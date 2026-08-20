@@ -927,10 +927,10 @@ var init_BrowserWebSocketTransport = __esm({
   }
 });
 
-// .wrangler/tmp/bundle-o6Thlq/middleware-loader.entry.ts
+// .wrangler/tmp/bundle-FfWEGl/middleware-loader.entry.ts
 init_modules_watch_stub();
 
-// .wrangler/tmp/bundle-o6Thlq/middleware-insertion-facade.js
+// .wrangler/tmp/bundle-FfWEGl/middleware-insertion-facade.js
 init_modules_watch_stub();
 
 // index.js
@@ -20392,37 +20392,142 @@ var TIMEFRAME_LABELS = {
 };
 var index_default = {
   async fetch(request, env) {
-    const { searchParams } = new URL(request.url);
+    const { searchParams, pathname } = new URL(request.url);
+    if (pathname === "/status") {
+      try {
+        const limits2 = await puppeteer_cloudflare_default.limits(env.MYBROWSER);
+        const sessions2 = await puppeteer_cloudflare_default.sessions(env.MYBROWSER);
+        return new Response(JSON.stringify({ limits: limits2, sessions: sessions2 }, null, 2), {
+          headers: { "content-type": "application/json" }
+        });
+      } catch (e) {
+        return new Response(JSON.stringify({ error: e.message, stack: e.stack }), {
+          status: 500,
+          headers: { "content-type": "application/json" }
+        });
+      }
+    }
+    if (pathname === "/cleanup") {
+      try {
+        const sessions2 = await puppeteer_cloudflare_default.sessions(env.MYBROWSER);
+        const closed = [];
+        for (const s of sessions2) {
+          try {
+            const browser2 = await puppeteer_cloudflare_default.connect(env.MYBROWSER, s.connectionId);
+            await browser2.close();
+            closed.push(s.connectionId);
+          } catch (err) {
+          }
+        }
+        return new Response(JSON.stringify({ message: `Attempted to close ${sessions2.length} sessions`, closed }, null, 2), {
+          headers: { "content-type": "application/json" }
+        });
+      } catch (e) {
+        return new Response(JSON.stringify({ error: e.message, stack: e.stack }), {
+          status: 500,
+          headers: { "content-type": "application/json" }
+        });
+      }
+    }
     const timeframe = searchParams.get("timeframe") ?? "1D";
     const label = TIMEFRAME_LABELS[timeframe] ?? TIMEFRAME_LABELS["1D"];
-    const browser = await puppeteer_cloudflare_default.launch(env.MYBROWSER);
-    const page = await browser.newPage();
-    await page.setViewport({ width: 1280, height: 800 });
-    await page.goto("https://www.livecharts.co.uk/ForexCharts/gbpusd.php", {
-      waitUntil: "networkidle0"
-    });
+    let browser = null;
     try {
-      const consentButton = await page.$(
-        "button[aria-label='Accept'], button[aria-label='Agree'], #onetrust-accept-btn-handler"
-      );
-      if (consentButton) await consentButton.click();
-    } catch {
-    }
-    try {
-      await page.evaluate((text) => {
-        const el = Array.from(document.querySelectorAll("button, a, span")).find(
-          (n) => n.textContent && n.textContent.trim() === text
+      let limits2;
+      try {
+        limits2 = await puppeteer_cloudflare_default.limits(env.MYBROWSER);
+      } catch (e) {
+        console.error("Failed to fetch limits:", e.message);
+      }
+      if (limits2 && limits2.remaining <= 0) {
+        return new Response(
+          JSON.stringify({
+            error: "Daily time limit exceeded. Free tier limit is 10 minutes of active browser time per day.",
+            limits: limits2
+          }),
+          { status: 429, headers: { "content-type": "application/json" } }
         );
-        if (el) el.click();
-      }, label);
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-    } catch {
+      }
+      if (limits2 && limits2.concurrent >= 3) {
+        console.warn("Stale/concurrent sessions count is high. Attempting to clean up...");
+        try {
+          const sessions2 = await puppeteer_cloudflare_default.sessions(env.MYBROWSER);
+          for (const s of sessions2) {
+            try {
+              const oldBrowser = await puppeteer_cloudflare_default.connect(env.MYBROWSER, s.connectionId);
+              await oldBrowser.close();
+            } catch {
+            }
+          }
+        } catch (err) {
+          console.error("Failed auto-cleanup of sessions:", err.message);
+        }
+      }
+      browser = await puppeteer_cloudflare_default.launch(env.MYBROWSER);
+      const page = await browser.newPage();
+      await page.setViewport({ width: 1280, height: 800 });
+      await page.goto("https://www.livecharts.co.uk/ForexCharts/gbpusd.php", {
+        waitUntil: "domcontentloaded",
+        timeout: 3e4
+      });
+      try {
+        await page.evaluate(() => {
+          const style = document.createElement("style");
+          style.textContent = `
+						[class*="fc-consent"], [class*="qc-cmp"], #ez-accept-all, 
+						[id^="sp_message"], .adblock-wall, [style*="z-index: 2"] {
+							display: none !important;
+							visibility: hidden !important;
+						}
+					`;
+          document.head.appendChild(style);
+          document.querySelectorAll("*").forEach((el) => {
+            const computed = window.getComputedStyle(el);
+            if ((computed.position === "fixed" || computed.position === "sticky") && computed.zIndex > 10) {
+              el.style.display = "none";
+            }
+          });
+          document.body.style.overflow = "auto";
+          document.documentElement.style.overflow = "auto";
+        });
+        await new Promise((resolve) => setTimeout(resolve, 2e3));
+      } catch {
+      }
+      try {
+        await page.evaluate((text) => {
+          const el = Array.from(document.querySelectorAll("button, a, span")).find(
+            (n) => n.textContent && n.textContent.trim() === text
+          );
+          if (el) el.click();
+        }, label);
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+      } catch {
+      }
+      const screenshot = await page.screenshot({ type: "png" });
+      return new Response(screenshot, {
+        headers: { "content-type": "image/png" }
+      });
+    } catch (error) {
+      return new Response(
+        JSON.stringify({
+          error: error.message,
+          stack: error.stack,
+          details: "An error occurred during Puppeteer browser execution. The browser has been safely closed."
+        }),
+        {
+          status: 500,
+          headers: { "content-type": "application/json" }
+        }
+      );
+    } finally {
+      if (browser) {
+        try {
+          await browser.close();
+        } catch (closeError) {
+          console.error("Failed to close browser in finally block:", closeError.message);
+        }
+      }
     }
-    const screenshot = await page.screenshot({ type: "png" });
-    await browser.close();
-    return new Response(screenshot, {
-      headers: { "content-type": "image/png" }
-    });
   }
 };
 
@@ -20445,7 +20550,7 @@ var drainBody = /* @__PURE__ */ __name(async (request, env, _ctx, middlewareCtx)
 }, "drainBody");
 var middleware_ensure_req_body_drained_default = drainBody;
 
-// .wrangler/tmp/bundle-o6Thlq/middleware-insertion-facade.js
+// .wrangler/tmp/bundle-FfWEGl/middleware-insertion-facade.js
 var __INTERNAL_WRANGLER_MIDDLEWARE__ = [
   middleware_ensure_req_body_drained_default
 ];
@@ -20477,7 +20582,7 @@ function __facade_invoke__(request, env, ctx, dispatch, finalMiddleware) {
 }
 __name(__facade_invoke__, "__facade_invoke__");
 
-// .wrangler/tmp/bundle-o6Thlq/middleware-loader.entry.ts
+// .wrangler/tmp/bundle-FfWEGl/middleware-loader.entry.ts
 var __Facade_ScheduledController__ = class ___Facade_ScheduledController__ {
   constructor(scheduledTime, cron, noRetry) {
     this.scheduledTime = scheduledTime;
