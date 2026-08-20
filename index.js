@@ -5,11 +5,11 @@ import puppeteer from "@cloudflare/puppeteer";
 // browser, right-clicking the timeframe buttons, and choosing "Inspect" --
 // then adjust the labels (or swap to a real CSS selector) below.
 const TIMEFRAME_LABELS = {
-	"1D": "1D",
-	"1W": "1W",
-	"1M": "1M",
-	"3M": "3M",
-	"1Y": "1Y",
+	"1D": "1 day",
+	"1W": "1 week",
+	"1M": "1 month",
+	"3M": "3 months",
+	"1Y": "1 year",
 };
 
 export default {
@@ -137,16 +137,35 @@ export default {
 				// failed to inject css/js
 			}
 
-			// Best-effort: click the timeframe control by its visible text.
+			// Best-effort: click the timeframe control by its visible text inside the TradingView iframe
 			try {
-				await page.evaluate((text) => {
-					const el = Array.from(document.querySelectorAll("button, a, span")).find(
-						(n) => n.textContent && n.textContent.trim() === text,
-					);
-					if (el) el.click();
-				}, label);
-				await new Promise((resolve) => setTimeout(resolve, 1500)); // let the chart redraw
-			} catch {
+				const frame = page.frames().find(f => f.url().includes('s.tradingview.com/widgetembed') || f.url().includes('tradingview.com'));
+				if (frame) {
+					const dropdownSelector = '[aria-label="Chart interval"]';
+					await frame.waitForSelector(dropdownSelector, { timeout: 5000 });
+					await frame.click(dropdownSelector);
+					await new Promise(r => setTimeout(r, 500)); // wait for dropdown to animate
+					
+					await frame.evaluate((text) => {
+						const items = Array.from(document.querySelectorAll('div[role="row"]'));
+						const targetItem = items.find(el => el.textContent && el.textContent.includes(text));
+						if (targetItem) {
+							targetItem.click();
+						}
+					}, label);
+					await new Promise((resolve) => setTimeout(resolve, 2000)); // let the chart redraw
+				} else {
+					// Fallback for non-iframe or different chart
+					await page.evaluate((text) => {
+						const el = Array.from(document.querySelectorAll("button, a, span")).find(
+							(n) => n.textContent && n.textContent.trim() === text,
+						);
+						if (el) el.click();
+					}, label);
+					await new Promise((resolve) => setTimeout(resolve, 1500));
+				}
+			} catch (err) {
+				console.log("Failed to toggle timeframe:", err.message);
 				// continue and just screenshot whatever is on screen
 			}
 

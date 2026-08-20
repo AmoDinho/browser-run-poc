@@ -927,10 +927,10 @@ var init_BrowserWebSocketTransport = __esm({
   }
 });
 
-// .wrangler/tmp/bundle-FfWEGl/middleware-loader.entry.ts
+// .wrangler/tmp/bundle-Po4qdX/middleware-loader.entry.ts
 init_modules_watch_stub();
 
-// .wrangler/tmp/bundle-FfWEGl/middleware-insertion-facade.js
+// .wrangler/tmp/bundle-Po4qdX/middleware-insertion-facade.js
 init_modules_watch_stub();
 
 // index.js
@@ -20384,11 +20384,11 @@ var puppeteer_cloudflare_default = puppeteer;
 
 // index.js
 var TIMEFRAME_LABELS = {
-  "1D": "1D",
-  "1W": "1W",
-  "1M": "1M",
-  "3M": "3M",
-  "1Y": "1Y"
+  "1D": "1 day",
+  "1W": "1 week",
+  "1M": "1 month",
+  "3M": "3 months",
+  "1Y": "1 year"
 };
 var index_default = {
   async fetch(request, env) {
@@ -20494,14 +20494,31 @@ var index_default = {
       } catch {
       }
       try {
-        await page.evaluate((text) => {
-          const el = Array.from(document.querySelectorAll("button, a, span")).find(
-            (n) => n.textContent && n.textContent.trim() === text
-          );
-          if (el) el.click();
-        }, label);
-        await new Promise((resolve) => setTimeout(resolve, 1500));
-      } catch {
+        const frame = page.frames().find((f) => f.url().includes("s.tradingview.com/widgetembed") || f.url().includes("tradingview.com"));
+        if (frame) {
+          const dropdownSelector = '[aria-label="Chart interval"]';
+          await frame.waitForSelector(dropdownSelector, { timeout: 5e3 });
+          await frame.click(dropdownSelector);
+          await new Promise((r) => setTimeout(r, 500));
+          await frame.evaluate((text) => {
+            const items = Array.from(document.querySelectorAll('div[role="row"]'));
+            const targetItem = items.find((el) => el.textContent && el.textContent.includes(text));
+            if (targetItem) {
+              targetItem.click();
+            }
+          }, label);
+          await new Promise((resolve) => setTimeout(resolve, 2e3));
+        } else {
+          await page.evaluate((text) => {
+            const el = Array.from(document.querySelectorAll("button, a, span")).find(
+              (n) => n.textContent && n.textContent.trim() === text
+            );
+            if (el) el.click();
+          }, label);
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+        }
+      } catch (err) {
+        console.log("Failed to toggle timeframe:", err.message);
       }
       const screenshot = await page.screenshot({ type: "png" });
       return new Response(screenshot, {
@@ -20550,7 +20567,7 @@ var drainBody = /* @__PURE__ */ __name(async (request, env, _ctx, middlewareCtx)
 }, "drainBody");
 var middleware_ensure_req_body_drained_default = drainBody;
 
-// .wrangler/tmp/bundle-FfWEGl/middleware-insertion-facade.js
+// .wrangler/tmp/bundle-Po4qdX/middleware-insertion-facade.js
 var __INTERNAL_WRANGLER_MIDDLEWARE__ = [
   middleware_ensure_req_body_drained_default
 ];
@@ -20582,7 +20599,7 @@ function __facade_invoke__(request, env, ctx, dispatch, finalMiddleware) {
 }
 __name(__facade_invoke__, "__facade_invoke__");
 
-// .wrangler/tmp/bundle-FfWEGl/middleware-loader.entry.ts
+// .wrangler/tmp/bundle-Po4qdX/middleware-loader.entry.ts
 var __Facade_ScheduledController__ = class ___Facade_ScheduledController__ {
   constructor(scheduledTime, cron, noRetry) {
     this.scheduledTime = scheduledTime;
