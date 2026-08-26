@@ -2,10 +2,18 @@
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "browser-run-hello-world",
   "main": "index.js",
-  // Set this to today's date when you actually deploy
   "compatibility_date": "2026-08-14",
   "compatibility_flags": ["nodejs_compat"],
   "browser": {
     "binding": "MYBROWSER"
+  },
+  "kv_namespaces": [
+    {
+      "binding": "CHARTS_KV",
+      "id": "9c654ced912e47ab9a037fe5c1aac380"
+    }
+  ],
+  "triggers": {
+    "crons": ["0 7 * * 1-5"]
   }
 }
