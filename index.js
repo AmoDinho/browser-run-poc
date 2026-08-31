@@ -6,6 +6,8 @@ const ASSET_URLS = {
 };
 
 const TIMEFRAME_LABELS = {
+	"30m": "30 minutes",
+	"3h": "3 hours",
 	"1D": "1 day",
 	"1W": "1 week",
 	"1M": "1 month",
@@ -256,8 +258,8 @@ export default {
 				endpoints: {
 					status: "/status",
 					cleanup: "/cleanup",
-					screenshot: "/screenshot?asset=[nasdaq100|gold]&timeframe=[1D|1W|1M|3M|1Y]",
-					latest: "/latest?asset=[nasdaq100|gold]&timeframe=[1D|1W|1M|3M|1Y]"
+					screenshot: "/screenshot?asset=[nasdaq100|gold]&timeframe=[30m|3h|1D|1W|1M|3M|1Y]",
+					latest: "/latest?asset=[nasdaq100|gold]&timeframe=[30m|3h|1D|1W|1M|3M|1Y]"
 				}
 			}, null, 2),
 			{ headers: { "content-type": "application/json" } }
@@ -276,32 +278,34 @@ export default {
 			}
 
 			const assets = ["nasdaq100", "gold"];
-			const timeframe = "1D";
+			const timeframes = ["1D", "30m", "3h"];
 
 			for (const asset of assets) {
-				try {
-					console.log(`Running scheduled capture for: ${asset}`);
-					const screenshot = await captureScreenshot(asset, timeframe, env);
+				for (const timeframe of timeframes) {
+					try {
+						console.log(`Running scheduled capture for: ${asset} ${timeframe}`);
+						const screenshot = await captureScreenshot(asset, timeframe, env);
 
-					if (env.CHARTS_KV) {
-						const dateStr = new Date().toISOString().split("T")[0];
-						const historicalKey = `${asset}/${timeframe}/${dateStr}.png`;
-						const latestKey = `${asset}/${timeframe}/latest.png`;
+						if (env.CHARTS_KV) {
+							const dateStr = new Date().toISOString().split("T")[0];
+							const historicalKey = `${asset}/${timeframe}/${dateStr}.png`;
+							const latestKey = `${asset}/${timeframe}/latest.png`;
 
-						// Put historical item
-						await env.CHARTS_KV.put(historicalKey, screenshot, {
-							customMetadata: { asset, timeframe, date: dateStr }
-						});
-						// Update latest item pointer
-						await env.CHARTS_KV.put(latestKey, screenshot, {
-							customMetadata: { asset, timeframe, date: dateStr }
-						});
-						console.log(`Saved screenshot to KV successfully: ${historicalKey}`);
-					} else {
-						console.warn("CHARTS_KV is not bound; screenshot was taken but not stored.");
+							// Put historical item
+							await env.CHARTS_KV.put(historicalKey, screenshot, {
+								customMetadata: { asset, timeframe, date: dateStr }
+							});
+							// Update latest item pointer
+							await env.CHARTS_KV.put(latestKey, screenshot, {
+								customMetadata: { asset, timeframe, date: dateStr }
+							});
+							console.log(`Saved screenshot to KV successfully: ${historicalKey}`);
+						} else {
+							console.warn("CHARTS_KV is not bound; screenshot was taken but not stored.");
+						}
+					} catch (err) {
+						console.error(`Scheduled capture failed for ${asset}/${timeframe}: ${err.message}`);
 					}
-				} catch (err) {
-					console.error(`Scheduled capture failed for ${asset}: ${err.message}`);
 				}
 			}
 		};
