@@ -1,5 +1,7 @@
 # Spec v3: Daily Chart Analyst — OpenAI analysis stage
 
+> **Superseded by `docs/fx-chart-analyst-spec-v4-deepseek.md`.** Do not implement this file. Vision is DeepSeek Chat Completions; textbook grounding is a prompt, not `file_search`.
+
 **Supersedes:** v1 (OpenAI, but written against a GBP/USD design that no longer matches the code) and v2 (DeepSeek).
 **Reconciled against:** the shipped `browser-run-hello-world` Worker on `feature/real_stuff`, and `docs/fx_daily_chart_spec.md`.
 **Status:** capture stage ~70% done; analysis and reporting stages not started.

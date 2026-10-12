@@ -1,6 +1,6 @@
 # Daily Chart Analyst — Implementation Plan
 
-Plan for taking the `browser-run-hello-world` Worker to the product described in `fx-chart-analyst-spec-v3-openai.md` ("spec v3"), sequenced from the outstanding work in `gap-analysis.md`.
+Plan for taking the `browser-run-hello-world` Worker to the product described in `fx-chart-analyst-spec-v4-deepseek.md` ("spec v4"). v3 is superseded. Sequenced from the outstanding work in `gap-analysis.md`.
 
 ## Current state (reconciled with `feature/real_stuff` HEAD `81462ff`)
 
@@ -9,17 +9,17 @@ The gap analysis was written before the last capture commit. Actual state now:
 - **Capture**: Browser + Puppeteer works; cron `0 7 * * 1-5`; assets `nasdaq100` + `gold`; KV persistence with `latest.png` pointers; free-tier guard + stale-session cleanup; ops endpoints `/status` `/cleanup` `/screenshot` `/latest`. All present.
 - **Ahead of the docs**: the cron already captures three timeframes per asset (`1D`, `30m`, `3h` → 6 PNGs/run) and `TIMEFRAME_LABELS` already includes intraday keys. But it launches a fresh browser session per (asset, timeframe), does **not** verify the toggle took effect, and records no `requested` vs `actual` state.
 - **Missing from capture**: chart-visibility assertion, interval-change verification, clip-to-chart, one session per asset, idempotency/`force`, per-run manifest.
-- **Not started**: TypeScript migration (CS-0), vector store (CS-C), reporting surface (CS-D), OpenAI analysis (CS-E), Workflow orchestration + retries (CS-F), hygiene (CS-G). The whole project is one plain-JS `index.js`.
+- **Not started**: TypeScript migration (CS-0), methodology prompt (CS-C), reporting surface (CS-D), DeepSeek analysis (CS-E), Workflow orchestration + retries (CS-F), hygiene (CS-G). The whole project is one plain-JS `index.js`.
 
 ## Phasing
 
-Phases are ordered so each builds on reviewable foundations: TS first (CS-0), then capture correctness (CS-A, CS-B), then the reporting surface before any model work (CS-D), then grounding (CS-C) and analysis (CS-E), then orchestration (CS-F), then hygiene (CS-G). CS-C is the only change set with a human-only critical path (choosing the textbooks) and should start as early as the PDFs are available; it is otherwise parallel to CS-A/B/D.
+Phases are ordered so each builds on reviewable foundations: TS first (CS-0), then capture correctness (CS-A, CS-B), then the reporting surface before any model work (CS-D), then the methodology prompt (CS-C) and analysis (CS-E), then orchestration (CS-F), then hygiene (CS-G). CS-C is the only change set with a human-only critical path (writing `knowledge/methodology.md`) and should start as early as the method is known; it is otherwise parallel to CS-A/B/D.
 
 ### Phase 1 — CS-0: TypeScript migration
 
 Scope:
 
-- Mechanical port of `index.js` into the spec v3 §5a layout, no behaviour changes:
+- Mechanical port of `index.js` into the spec v4 §5a layout, no behaviour changes:
   - `src/index.ts` — fetch/scheduled handlers, routing only
   - `src/capture/browser.ts` — session, consent dismissal, interval switching, screenshots
   - `src/capture/config.ts` — asset + timeframe config (moved from module constants)
@@ -86,51 +86,42 @@ Acceptance:
 - Unauthenticated access to any `/reports` route → 404.
 - `render.ts` unit tests pass over fixture including the `poor`-quality path.
 
-### Phase 5 — CS-C: vector store grounding (parallel; human critical path)
+### Phase 5 — CS-C: methodology prompt (parallel; human critical path)
 
 Scope:
 
-- Human: choose the textbook PDFs (the only item no agent can do) and place them in `knowledge/src/` (gitignored).
-- `scripts/setup-vector-store.mjs`: idempotently upload PDFs, create the store, attach files, poll until `completed`, print the store id.
-- `OPENAI_VECTOR_STORE_ID` into config; commit `knowledge/manifest.json` (filenames, page counts, store id) so the corpus behind any report is traceable.
-- Standalone smoke test: a `file_search` call answers a question only answerable from the PDFs.
+- Human: write `knowledge/methodology.md` — section headings, decision order, what to read off a chart, what must not be invented. PDFs stay out of the repo and the Worker.
+- `src/analysis/prompt.ts` loads that file into the system prompt and stamps `PROMPT_VERSION`.
 
 Acceptance:
 
-- Smoke call returns citations from the PDFs.
-- Re-running the setup script does not duplicate files.
-- `knowledge/manifest.json` committed; PDFs stay out of git.
+- The file is committed.
+- A fixture report cites section headings from it.
+- No vector-store script, no `OPENAI_VECTOR_STORE_ID`.
 
-### Phase 6 — CS-E: OpenAI analysis
+### Phase 6 — CS-E: DeepSeek analysis
 
 Scope:
 
-- Dependencies: `ai`, `@ai-sdk/openai`, `zod`.
-- Provider built per request via `createOpenAI({ apiKey: env.OPENAI_API_KEY })` — no module-scope `process.env`.
-- `OPENAI_API_KEY` as a Worker secret; `OPENAI_MODEL` (default `gpt-5.6-luna`) and `OPENAI_REASONING_EFFORT` as vars.
-- Per screenshot: `uploadFile` → `ProviderReference` persisted in the report JSON (no browser re-run for prompt iteration).
-- `generateText` on `openai.responses(OPENAI_MODEL)` with `tools: { file_search: fileSearch({ vectorStoreIds }) }` and `output: Output.object({ schema })` over the Zod schema in `src/analysis/schema.ts` (single source of truth; types flow to render + storage).
-- `NoObjectGeneratedError` handling: write `cause`/`text`/`response`/`usage` to the run log, retry once.
-- Grounding-trail logging: `include: ['file_search_call.results']`; log whether a search happened, its query, result count; flag empty `doc_citations` on substantive reports.
-- Token usage / latency logging to `runs/{asset}/{date}.json`.
-- Wire `POST /analyse?asset=…&date=…&force=1`.
-
-Gate before building the rest of CS-E:
-
-- **§6.5 combination check**: assert from logged steps that a `file_search` call happened *and* a schema-valid object came back in the same request. If marginal, switch to the pre-specified two-call design (grounded prose via `generateText`, then `generateObject` shaping) and continue.
-- **Tier calibration**: run one day's six screenshots through `gpt-5.6-luna` and `gpt-5.6-terra` at the same reasoning effort, compare against a human read of the charts; try `reasoning_effort: high` on Luna before escalating tier. Model string is a one-line change.
+- Chat Completions at `https://api.deepseek.com/chat/completions`. SDK only if the wire format matches; otherwise `fetch`.
+- Client built per request from `env.DEEPSEEK_API_KEY`. No module-scope `process.env`.
+- `DEEPSEEK_API_KEY` as a Worker secret; `DEEPSEEK_MODEL` (`deepseek-flash`) and `DEEPSEEK_REASONING_EFFORT` (`high`) as vars.
+- Per screenshot: PNG bytes from KV or the capture step, base64 `image_url`, `detail: "original"`, user message only. No Files API, no `ProviderReference`.
+- `response_format: { type: "json_object" }`, then Zod-parse. Retry once on empty content, `finish_reason: "length"`, or schema failure. Do not use `Output.object()`.
+- Log usage, `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`, `reasoning_content`, and `finish_reason` to `runs/{asset}/{date}.json`. Flag empty `method_citations`.
+- Wire `POST /analyse?asset=…&date=…&force=1`. Re-analysis re-encodes PNGs from KV.
 
 Acceptance:
 
-- Coherent report from real screenshots with non-empty `doc_citations`.
+- Coherent report from real screenshots with non-empty `method_citations`.
 - Deliberately blank image yields `capture_quality: "poor"`, not confident fiction.
-- Calibration note recorded (Luna kept or tier escalated with evidence).
+- Calibration note recorded against a human read. Weak read → `reasoning_effort: max`, not a model change.
 
 ### Phase 7 — CS-F: orchestration with retries
 
 Scope:
 
-- Migrate `scheduled()` into a Cloudflare Workflow (`src/workflow.ts`, `DailyAnalysisWorkflow`) with per-step retries: capture → upload → analyse → persist.
+- Migrate `scheduled()` into a Cloudflare Workflow (`src/workflow.ts`, `DailyAnalysisWorkflow`) with per-step retries: capture → analyse → persist.
 - Cron binds to the Workflow trigger; keep manual `/run` permanently as the debug entry point (in addition to `/analyse`).
 
 Acceptance:
@@ -156,7 +147,7 @@ Acceptance:
 
 ## Open decisions
 
-1. **Timeframe set** (spec v3 §4.1; blocks CS-B config). Current cron captures `{1D, 30m, 3h}`. Options: A intraday `{1D, 3H, 15M}` (3H → 30M fallback) — recommended given the 07:00 weekday cadence; B positional `{1Y, 3M, 1D}`; C both (5 images). Intraday labels need verification inside the widget as part of CS-B.
-2. **Textbooks** (blocks CS-C completion). Human-only, longest lead — start as early as possible.
-3. **Bring-up asset** (spec §9.3): recommend `gold` only during CS-E bring-up to halve the debugging surface, both assets for the scheduled path.
-4. **Model tier**: `gpt-5.6-luna` default; escalated only on CS-E calibration evidence.
+1. **Timeframe set** (spec v4 §4.1; blocks CS-B config). Current cron captures `{1D, 30m, 3h}`. Options: A intraday `{1D, 3h, 15m}` (3h → 30m fallback) — recommended given the 07:00 weekday cadence; B positional `{1Y, 3M, 1D}`; C both (5 images). `15m` is not in `TIMEFRAME_LABELS` and needs verification inside the widget.
+2. **Methodology text** (blocks a meaningful CS-E). Human-only, longest lead — start as early as possible.
+3. **Bring-up asset** (spec v4 §9.3): recommend `gold` only during CS-E bring-up, both assets for the scheduled path.
+4. **Model**: `deepseek-flash` only. `deepseek-v4-pro` has no vision.
