@@ -1,15 +1,21 @@
 {
-  "name": "browser-run-hello-world",
-  "version": "0.0.1",
-  "private": true,
-  "scripts": {
-    "dev": "wrangler dev --remote",
-    "deploy": "wrangler deploy"
-  },
-  "dependencies": {
-    "@cloudflare/puppeteer": "^1.0.4"
-  },
-  "devDependencies": {
-    "wrangler": "^4.59.3"
-  }
+	"name": "fx-chart-analyst",
+	"version": "0.0.1",
+	"private": true,
+	"scripts": {
+		"dev": "wrangler dev --remote",
+		"typecheck": "tsc --noEmit",
+		"test": "tsx --test test/*.ts",
+		"deploy": "tsc --noEmit && wrangler deploy"
+	},
+	"dependencies": {
+		"@cloudflare/puppeteer": "^1.0.4",
+		"zod": "3.25.76"
+	},
+	"devDependencies": {
+		"@types/node": "26.6.5",
+		"tsx": "4.23.15",
+		"typescript": "7.0.2",
+		"wrangler": "^4.59.3"
+	}
 }
