@@ -9,7 +9,7 @@
 	},
 	"kv_namespaces": [
 		{
-			"binding": "CHARTS_KV",
+			"binding": "CHARTS_KV_II",
 			"id": "9c654ced912e47ab9a037fe5c1aac380"
 		}
 	],

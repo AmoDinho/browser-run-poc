@@ -9,7 +9,7 @@ import { renderReport } from "../report/render";
 import { getBytes, getText, putText, reportJsonKey, reportMdKey, runKey, screenshotKey } from "../storage/kv";
 import { AnalysisRequestError, completeChat, resolveModel } from "./client";
 import { isUnusableCompletion, parseAnalysis } from "./parse";
-import { METHODOLOGY_SECTIONS, PROMPT_VERSION } from "./prompt";
+import { CITABLE_SECTIONS, PROMPT_VERSION } from "./prompt";
 import { buildRunContext, buildUserContent, type UserPart } from "./request";
 import { SCHEMA_VERSION, chartAnalysisSchema, type ChartAnalysis } from "./schema";
 
@@ -130,7 +130,7 @@ export async function analyseAsset(env: WorkerEnv, input: AnalyseInput): Promise
 	}
 	const stamped = stamp(analysis, env, input, requested, actual, notes, hintPoor);
 	const validated = chartAnalysisSchema.parse(stamped);
-	const unknown = validated.method_citations.map((item) => item.section).filter((section) => !METHODOLOGY_SECTIONS.includes(section));
+	const unknown = validated.method_citations.map((item) => item.section).filter((section) => !CITABLE_SECTIONS.includes(section));
 	const groundingWarning = validated.capture.capture_quality !== "poor" && validated.method_citations.length === 0;
 	const errors = [
 		...(groundingWarning ? ["method_citations is empty"] : []),

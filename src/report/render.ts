@@ -7,7 +7,7 @@ export function renderReport(analysis: ChartAnalysis): string {
 	const lines: string[] = [`# ${analysis.asset}`, ""];
 	if (analysis.capture.capture_quality === "poor") {
 		const note = analysis.capture.notes ? ` ${analysis.capture.notes}` : "";
-		lines.push(`> **Capture warning:** chart capture quality is poor. Bias is withheld.${note}`, "");
+		lines.push(`> **Capture warning:** chart capture quality is poor. Bias and trade plan are withheld.${note}`, "");
 	} else if (analysis.method_citations.length === 0) {
 		lines.push("> **Grounding warning:** method_citations is empty. The model did not cite the methodology.", "");
 	}
@@ -18,6 +18,20 @@ export function renderReport(analysis: ChartAnalysis): string {
 		lines.push("## Bias", "", `Direction: ${analysis.bias.direction}`);
 		if (analysis.bias.timeframe_agreement) lines.push(`Agreement: ${analysis.bias.timeframe_agreement}`);
 		if (analysis.bias.rationale) lines.push(`Rationale: ${analysis.bias.rationale}`);
+		lines.push("");
+		lines.push("## Verdict", "");
+		lines.push(`${analysis.asset} | ${analysis.verdict.direction} | ${analysis.verdict.grade}`);
+		lines.push(`Entry: ${analysis.verdict.entry ?? "NOT VISIBLE"}`);
+		lines.push(`Stop: ${analysis.verdict.stop ?? "NOT VISIBLE"} (buffer: ${analysis.verdict.stop_buffer ?? "NOT VISIBLE"})`);
+		lines.push(
+			`T1: ${analysis.verdict.t1 ?? "NOT VISIBLE"} (${analysis.verdict.t1_rr ?? "n/a"}) | T2: ${analysis.verdict.t2 ?? "NOT VISIBLE"} (${analysis.verdict.t2_rr ?? "n/a"}) | T3: ${analysis.verdict.t3 ?? "NOT VISIBLE"} (${analysis.verdict.t3_rr ?? "n/a"})`,
+		);
+		lines.push(`Risk: ${analysis.verdict.risk_percent ?? "NOT VISIBLE"}`);
+		const passed = analysis.verdict.checklist.filter((item) => item.result === "PASS").length;
+		lines.push(`Checklist: ${passed}/${analysis.verdict.checklist.length} PASS`);
+		if (analysis.verdict.reason) lines.push(analysis.verdict.reason);
+		lines.push("");
+		lines.push(bullets(analysis.verdict.checklist.map((item) => `${item.result}: ${item.item}`)));
 		lines.push("");
 	}
 	lines.push("## Timeframes", "");

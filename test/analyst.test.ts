@@ -130,19 +130,26 @@ test("cron cannot force a re-run", () => {
 	assert.equal(manual.force, true);
 });
 
-test("methodology is a citeable placeholder, not a textbook paste", () => {
+test("decision procedure and reference context are separate files", () => {
 	const method = readFileSync(new URL("../knowledge/methodology.md", import.meta.url), "utf8");
+	const context = readFileSync(new URL("../knowledge/context.md", import.meta.url), "utf8");
 	const prompt = readFileSync(new URL("../src/analysis/prompt.ts", import.meta.url), "utf8");
 	const client = readFileSync(new URL("../src/analysis/client.ts", import.meta.url), "utf8");
-	assert.match(method, /placeholder/i);
+	assert.match(method, /stand aside/);
+	assert.match(context, /stored separately/);
+	assert.equal(method.includes("Pin bar or hammer"), false);
 	assert.deepEqual(markdownH2(method), [
-		"Order of work",
-		"What to read",
-		"What must not be invented",
-		"Agreement and invalidation",
-		"When this document does not cover it",
+		"Inputs",
+		"Ground rules",
+		"HTF bias and dealing range",
+		"ITF phase and alignment",
+		"STF sessions liquidity and traps",
+		"ETF inducement and confirmation",
+		"Trade plan",
+		"Final verdict",
 	]);
 	assert.match(prompt, /knowledge\/methodology\.md/);
+	assert.match(prompt, /knowledge\/context\.md/);
 	assert.match(prompt, /json/);
 	assert.equal(client.includes("temperature"), false);
 	assert.equal(client.includes("/chat/completions"), true);
