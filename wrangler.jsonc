@@ -1,11 +1,37 @@
 {
-  "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "browser-run-hello-world",
-  "main": "index.js",
-  // Set this to today's date when you actually deploy
-  "compatibility_date": "2026-08-14",
-  "compatibility_flags": ["nodejs_compat"],
-  "browser": {
-    "binding": "MYBROWSER"
-  }
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"name": "fx-chart-analyst",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-08-14",
+	"compatibility_flags": ["nodejs_compat"],
+	"browser": {
+		"binding": "MYBROWSER"
+	},
+	"kv_namespaces": [
+		{
+			"binding": "CHARTS_KV_II",
+			"id": "9c654ced912e47ab9a037fe5c1aac380"
+		}
+	],
+	"workflows": [
+		{
+			"name": "fx-chart-analyst-daily",
+			"binding": "DAILY_ANALYSIS",
+			"class_name": "DailyAnalysisWorkflow"
+		}
+	],
+	"triggers": {
+		"crons": ["0 7 * * 1-5"]
+	},
+	"vars": {
+		"DEEPSEEK_MODEL": "deepseek-flash",
+		"DEEPSEEK_REASONING_EFFORT": "high"
+	},
+	"rules": [
+		{
+			"type": "Text",
+			"globs": ["**/*.md"],
+			"fallthrough": false
+		}
+	]
 }

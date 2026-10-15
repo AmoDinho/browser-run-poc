@@ -1,42 +1,44 @@
-# Browser Run Hello World — LiveCharts GBP/USD
+# FX Chart Analyst
 
-A minimal Cloudflare Worker using Browser Run (Puppeteer) to screenshot the
-GBP/USD chart on livecharts.co.uk at a chosen timeframe.
+Cloudflare Worker that captures Nasdaq 100 and gold charts and writes a DeepSeek vision report. Capture and analysis run as separate steps in `DailyAnalysisWorkflow`, not inside one `scheduled()` call.
 
-## Setup
+The Worker name is `fx-chart-analyst` (previously `browser-run-hello-world`). Deploying creates or updates that script. The existing `CHARTS_KV` namespace id is unchanged.
 
-1. Install dependencies:
-   ```
-   npm install
-   ```
-2. Log in to Cloudflare (one-time):
-   ```
-   npx wrangler login
-   ```
-3. Run locally against a real remote browser:
-   ```
-   npm run dev
-   ```
-   Then open: `http://localhost:8787/?timeframe=1D`
+## Decisions
 
-4. Deploy:
-   ```
-   npm run deploy
-   ```
-   Then open: `https://browser-run-hello-world.<your-subdomain>.workers.dev/?timeframe=1D`
+- Timeframes per asset: `1D`, `30m`, `3h`. `15m` is not in the widget label map, so it is not requested. If `3 hours` is absent, capture falls back to `30 minutes` and records that.
+- Both `nasdaq100` and `gold` run on the weekday cron.
+- Model is `deepseek-flash` only. Vision calls are raw `POST https://api.deepseek.com/chat/completions`.
+- `knowledge/methodology.md` is the decision procedure (order-flow prompt). `knowledge/context.md` is separate reference notes. Both are loaded into the system message. The decision procedure wins if they conflict.
 
-## Before you rely on this
+## Endpoints
 
-Open `https://www.livecharts.co.uk/ForexCharts/gbpusd.php` in a normal
-browser, right-click the timeframe buttons (1D / 1W / 1M etc.), and choose
-"Inspect" to confirm the exact text or selector. Update `TIMEFRAME_LABELS`
-in `src/index.js` if the real labels differ from the guesses in this
-starter (the click-by-visible-text approach is a best-effort placeholder).
+- `GET /status` — browser limits and sessions
+- `GET /cleanup` — close abandoned browser sessions
+- `GET /screenshot?asset=nasdaq100|gold&timeframe=30m|3h|1D|1W|1M|3M|1Y` — one clipped screenshot
+- `GET /latest?asset=…&timeframe=…` — latest stored PNG
+- `GET /reports?token=…` — report dates, newest first
+- `GET /reports/:asset/:date?token=…` — report HTML
+- `GET /reports/:asset/:date/:tf.png?token=…` — stored PNG for that date
+- `GET|POST /run?token=…&force=1` — capture then analyse. Cron never sends `force=1`
+- `GET|POST /analyse?token=…&asset=gold&date=YYYY-MM-DD&force=1` — re-encode PNGs from KV. No recapture
 
-Also check whether a cookie/consent banner appears on first load — if the
-dismiss logic in `src/index.js` doesn't match it, screenshots will still
-work, they'll just show the banner over the chart.
+Wrong or missing `token` on `/reports`, `/run`, and `/analyse` is **404**, not 401.
 
-## Query params
+## Secrets
 
-- `timeframe` — one of `1D`, `1W`, `1M`, `3M`, `1Y` (defaults to `1D`)
+```bash
+npx wrangler secret put DEEPSEEK_API_KEY
+npx wrangler secret put VIEWER_TOKEN
+npx wrangler secret put FAILURE_WEBHOOK_URL
+```
+
+`FAILURE_WEBHOOK_URL` is optional. `DEEPSEEK_MODEL` and `DEEPSEEK_REASONING_EFFORT` are vars (`deepseek-flash`, `high`). Wrangler needs Node 22.
+
+```bash
+yarn install
+yarn typecheck
+yarn test
+yarn dev
+yarn deploy
+```
