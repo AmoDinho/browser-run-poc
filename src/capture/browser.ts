@@ -134,11 +134,11 @@ export async function captureAsset(env: WorkerEnv, request: CaptureRequest): Pro
 	if (timeframes.length === 0) throw new ConfigError("No timeframes to capture");
 	const limit = await checkLimits(env);
 	if (!limit.allowed) throw new QuotaError("Daily time limit exceeded");
-	if (request.store && !env.CHARTS_KV) throw new ConfigError("CHARTS_KV namespace binding is not configured");
-	if (request.store && env.CHARTS_KV && !request.force) {
+	if (request.store && !env.CHARTS_CACHE) throw new ConfigError("CHARTS_CACHE namespace binding is not configured");
+	if (request.store && env.CHARTS_CACHE && !request.force) {
 		const present: string[] = [];
 		for (const timeframe of timeframes) {
-			if (await hasKey(env.CHARTS_KV, screenshotKey(request.asset, timeframe, request.date))) present.push(timeframe);
+			if (await hasKey(env.CHARTS_CACHE, screenshotKey(request.asset, timeframe, request.date))) present.push(timeframe);
 		}
 		if (present.length === timeframes.length) {
 			return {
@@ -204,7 +204,7 @@ async function captureInBrowser(
 				continue;
 			}
 			seen.push(captured.hash);
-			if (request.store && env.CHARTS_KV) {
+			if (request.store && env.CHARTS_CACHE) {
 				const key = screenshotKey(request.asset, captured.frame.timeframe, request.date);
 				const metadata = {
 					asset: request.asset,
@@ -214,8 +214,8 @@ async function captureInBrowser(
 					width: String(captured.frame.width ?? ""),
 					height: String(captured.frame.height ?? ""),
 				};
-				await putBytes(env.CHARTS_KV, key, captured.bytes, metadata);
-				await putBytes(env.CHARTS_KV, latestKey(request.asset, captured.frame.timeframe), captured.bytes, metadata);
+				await putBytes(env.CHARTS_CACHE, key, captured.bytes, metadata);
+				await putBytes(env.CHARTS_CACHE, latestKey(request.asset, captured.frame.timeframe), captured.bytes, metadata);
 				frames.push({ ...stripBytes(captured.frame), key, stored: true });
 			} else {
 				loneBytes = captured.bytes;

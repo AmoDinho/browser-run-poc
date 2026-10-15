@@ -51,7 +51,7 @@ type RunRecord = {
 };
 
 export async function recordTerminalFailure(env: WorkerEnv, input: AnalyseInput, error: string): Promise<void> {
-	const kv = env.CHARTS_KV;
+	const kv = env.CHARTS_CACHE;
 	if (!kv) return;
 	const requested = input.capture?.requestedTimeframes ?? [...DAILY_TIMEFRAMES];
 	const actual = input.capture?.actualTimeframes ?? [];
@@ -62,8 +62,8 @@ export async function recordTerminalFailure(env: WorkerEnv, input: AnalyseInput,
 
 export async function analyseAsset(env: WorkerEnv, input: AnalyseInput): Promise<AnalyseResult> {
 	const started = Date.now();
-	const kv = env.CHARTS_KV;
-	if (!kv) throw new AnalysisRequestError("CHARTS_KV namespace binding is not configured", false);
+	const kv = env.CHARTS_CACHE;
+	if (!kv) throw new AnalysisRequestError("CHARTS_CACHE namespace binding is not configured", false);
 	const requested = input.capture?.requestedTimeframes ?? [...DAILY_TIMEFRAMES];
 	const notes = [...(input.capture?.notes ?? [])];
 	if (!input.force) {
@@ -226,7 +226,7 @@ async function fail(
 	completion: { content: string; reasoningContent: string | null; finishReason: string | null; usage: RunRecord["usage"] },
 	error: string,
 ): Promise<void> {
-	const kv = env.CHARTS_KV;
+	const kv = env.CHARTS_CACHE;
 	if (!kv) return;
 	await writeRun(kv, input, {
 		...emptyRun(input, started, requested, actual, notes, false, [error]),

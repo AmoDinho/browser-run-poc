@@ -9,8 +9,8 @@
 	},
 	"kv_namespaces": [
 		{
-			"binding": "CHARTS_KV_II",
-			"id": "9c654ced912e47ab9a037fe5c1aac380"
+			"binding": "CHARTS_CACHE",
+			"id": "547be7507ded4a438c5912c207842a85"
 		}
 	],
 	"workflows": [

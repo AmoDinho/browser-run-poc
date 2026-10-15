@@ -94,8 +94,8 @@ async function screenshot(searchParams: URLSearchParams, env: WorkerEnv): Promis
 async function latest(searchParams: URLSearchParams, env: WorkerEnv): Promise<Response> {
 	const asset = searchParams.get("asset") ?? "nasdaq100";
 	const timeframe = searchParams.get("timeframe") ?? "1D";
-	if (!env.CHARTS_KV) return json({ error: "CHARTS_KV namespace binding is not configured in this environment." }, 500);
-	const image = await getBytes(env.CHARTS_KV, `${asset}/${timeframe}/latest.png`);
+	if (!env.CHARTS_CACHE) return json({ error: "CHARTS_CACHE namespace binding is not configured in this environment." }, 500);
+	const image = await getBytes(env.CHARTS_CACHE, `${asset}/${timeframe}/latest.png`);
 	if (!image) return json({ error: `No stored screenshot found for asset '${asset}' with timeframe '${timeframe}'.` }, 404);
 	return new Response(arrayBuffer(image), { headers: { "content-type": "image/png" } });
 }
@@ -104,9 +104,9 @@ async function reports(url: URL, env: WorkerEnv): Promise<Response> {
 	if (!viewerAllowed(url, env)) return notFound();
 	const token = url.searchParams.get("token") ?? "";
 	const parts = url.pathname.split("/").filter(Boolean);
-	if (!env.CHARTS_KV) return notFound();
+	if (!env.CHARTS_CACHE) return notFound();
 	if (parts.length === 1) {
-		const rows = await listReportEntries(env.CHARTS_KV);
+		const rows = await listReportEntries(env.CHARTS_CACHE);
 		return html(reportsListPage(rows, token));
 	}
 	const asset = parts[1] ?? "";
@@ -115,12 +115,12 @@ async function reports(url: URL, env: WorkerEnv): Promise<Response> {
 	if (parts.length === 4 && parts[3]?.endsWith(".png")) {
 		const timeframe = parts[3].slice(0, -4);
 		if (!isTimeframe(timeframe)) return notFound();
-		const image = await getBytes(env.CHARTS_KV, screenshotKey(asset, timeframe, date));
+		const image = await getBytes(env.CHARTS_CACHE, screenshotKey(asset, timeframe, date));
 		if (!image) return notFound();
 		return new Response(arrayBuffer(image), { headers: { "content-type": "image/png", "x-content-type-options": "nosniff" } });
 	}
 	if (parts.length !== 3) return notFound();
-	const markdown = await getText(env.CHARTS_KV, reportMdKey(asset, date));
+	const markdown = await getText(env.CHARTS_CACHE, reportMdKey(asset, date));
 	if (!markdown) return notFound();
 	return html(reportPage({
 		title: `${asset} ${date}`,
