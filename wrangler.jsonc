@@ -27,6 +27,13 @@
 		"DEEPSEEK_MODEL": "deepseek-flash",
 		"DEEPSEEK_REASONING_EFFORT": "high"
 	},
+	"observability": {
+		"enabled": true,
+		"logs": {
+			"enabled": true,
+			"invocation_logs": true
+		}
+	},
 	"rules": [
 		{
 			"type": "Text",
