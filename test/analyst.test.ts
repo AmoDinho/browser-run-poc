@@ -41,6 +41,12 @@ test("matches the interval button readback", () => {
 	assert.equal(intervalLabelMatches("1D | Chart interval", "1D", "1 day"), true);
 	assert.equal(intervalLabelMatches("30 | Chart interval", "3h", "3 hours"), false);
 	assert.equal(intervalLabelMatches("3 hours | Chart interval", "3h", "3 hours"), true);
+	assert.equal(intervalLabelMatches("1 day | 1D | D | 1D", "1D", "1 day"), true);
+	assert.equal(intervalLabelMatches("3 hours | 180 | 3h | 3h", "3h", "3 hours"), true);
+	assert.equal(intervalLabelMatches("30 minutes | 30 | 30m | 30m", "30m", "30 minutes"), true);
+	assert.equal(intervalLabelMatches("| | Chart interval", "1D", "1 day"), false);
+	assert.equal(intervalLabelMatches("5 minutes | 5 | 5m | 5", "1D", "1 day"), false);
+	assert.equal(intervalLabelMatches("30 minutes | 30 | 30m | 30m", "3h", "3 hours"), false);
 });
 
 test("schema example is the only json shape", () => {

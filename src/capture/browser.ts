@@ -12,7 +12,8 @@ import {
 import { clipBox, isChartBoxVisible, pngFailsVisibility, pngSize, type Box } from "./visibility";
 import { intervalLabelMatches, isDuplicateHash, resolveTimeframeChoice, sha256Hex } from "./verify";
 
-const INTERVAL_SELECTOR = '[aria-label="Chart interval"]';
+const INTERVAL_ROOT = "#header-toolbar-intervals";
+const INTERVAL_SELECTOR = `${INTERVAL_ROOT} [aria-label="Chart interval"]`;
 
 export class QuotaError extends Error {
 	constructor(message: string) {
@@ -265,11 +266,14 @@ async function captureOne(page: Page, requested: Timeframe, seen: string[], alre
 	if (!frame) return failed(requested, "tradingview frame not found");
 	let choice: { timeframe: string; label: string; note: string | null };
 	try {
-		await frame.waitForSelector(INTERVAL_SELECTOR, { timeout: 8000 });
+		await frame.waitForSelector(INTERVAL_ROOT, { timeout: 8000 });
 		const current = await readInterval(frame);
 		if (intervalLabelMatches(current, requested, TIMEFRAME_LABELS[requested])) {
 			choice = { timeframe: requested, label: TIMEFRAME_LABELS[requested], note: null };
 			await sleep(1500);
+		} else if (await clickToolbarRadio(frame, TIMEFRAME_LABELS[requested])) {
+			choice = { timeframe: requested, label: TIMEFRAME_LABELS[requested], note: null };
+			await sleep(3000);
 		} else {
 			await frame.click(INTERVAL_SELECTOR);
 			await sleep(800);
@@ -340,6 +344,10 @@ async function captureOne(page: Page, requested: Timeframe, seen: string[], alre
 
 async function reselect(frame: Frame, label: string): Promise<void> {
 	try {
+		if (await clickToolbarRadio(frame, label)) {
+			await sleep(3000);
+			return;
+		}
 		await frame.click(INTERVAL_SELECTOR);
 		await sleep(800);
 		await clickLabel(frame, label);
@@ -400,27 +408,50 @@ function tradingViewFrame(page: Page): Frame | null {
 
 async function readInterval(frame: Frame): Promise<string> {
 	return frame.evaluate(() => {
-		const button = document.querySelector('[aria-label="Chart interval"]');
-		if (!button) return "";
-		return [button.textContent ?? "", button.getAttribute("title") ?? "", button.getAttribute("aria-label") ?? ""]
+		const root = document.querySelector("#header-toolbar-intervals");
+		const checked = root?.querySelector('button[role="radio"][aria-checked="true"]');
+		const legend = document.querySelector('[data-qa-id~="legend-source-interval"]');
+		return [
+			checked?.getAttribute("aria-label") ?? "",
+			checked?.getAttribute("data-value") ?? "",
+			checked?.textContent ?? "",
+			legend?.textContent ?? "",
+		]
 			.join(" | ")
 			.replace(/\s+/g, " ")
 			.trim();
 	});
 }
 
+async function clickToolbarRadio(frame: Frame, label: string): Promise<boolean> {
+	return frame.evaluate((text) => {
+		const root = document.querySelector("#header-toolbar-intervals");
+		if (!root) return false;
+		const radio = Array.from(root.querySelectorAll('button[role="radio"]')).find((el) => {
+			const name = (el.getAttribute("aria-label") ?? el.getAttribute("data-tooltip") ?? "").toLowerCase();
+			return name === text.toLowerCase();
+		});
+		if (!(radio instanceof HTMLElement)) return false;
+		if (radio.getAttribute("aria-checked") !== "true") radio.click();
+		return true;
+	}, label);
+}
+
 async function menuLabels(frame: Frame): Promise<string[]> {
-	return frame.evaluate(() =>
-		Array.from(document.querySelectorAll('div[role="row"]'))
+	return frame.evaluate(() => {
+		const items = document.querySelectorAll('[data-qa-id="interval-menu-item"]');
+		const nodes = items.length > 0 ? items : document.querySelectorAll('div[role="row"]');
+		return Array.from(nodes)
 			.map((el) => (el.textContent ?? "").replace(/\s+/g, " ").trim())
-			.filter(Boolean),
-	);
+			.filter(Boolean);
+	});
 }
 
 async function clickLabel(frame: Frame, label: string): Promise<boolean> {
 	return frame.evaluate((text) => {
-		const items = Array.from(document.querySelectorAll('div[role="row"]'));
-		const target = items.find((el) => el.textContent?.includes(text));
+		const items = document.querySelectorAll('[data-qa-id="interval-menu-item"]');
+		const nodes = items.length > 0 ? items : document.querySelectorAll('div[role="row"]');
+		const target = Array.from(nodes).find((el) => el.textContent?.toLowerCase().includes(text.toLowerCase()));
 		if (!target) return false;
 		if (target instanceof HTMLElement) target.click();
 		else target.dispatchEvent(new MouseEvent("click", { bubbles: true }));
