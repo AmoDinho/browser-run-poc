@@ -40,11 +40,13 @@ jobs:
           packageManager: yarn
           secrets: |
             DEEPSEEK_API_KEY
+            VIEWER_TOKEN
             TELEGRAM_BOT_TOKEN
             TELEGRAM_CHAT_ID
             PUBLIC_ORIGIN
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          VIEWER_TOKEN: ${{ secrets.VIEWER_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           PUBLIC_ORIGIN: ${{ secrets.PUBLIC_ORIGIN }}

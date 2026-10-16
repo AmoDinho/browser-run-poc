@@ -32,11 +32,10 @@ Wrong or missing `token` on `/reports`, `/brief`, `/run`, and `/analyse` is **40
 
 ```bash
 npx wrangler secret put DEEPSEEK_API_KEY
-npx wrangler secret put VIEWER_TOKEN
 npx wrangler secret put FAILURE_WEBHOOK_URL
 ```
 
-`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, and `PUBLIC_ORIGIN` are GitHub repo secrets. Deploy uploads them. `PUBLIC_ORIGIN` is the worker origin with no trailing slash. `FAILURE_WEBHOOK_URL` is optional. Without the Telegram secrets the morning step logs `telegram.skipped` and does not fail the run. `DEEPSEEK_MODEL` and `DEEPSEEK_REASONING_EFFORT` are vars (`deepseek-flash`, `high`). Wrangler needs Node 22.
+`VIEWER_TOKEN`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, and `PUBLIC_ORIGIN` are GitHub repo secrets. Deploy uploads them. `VIEWER_TOKEN` is the `?token=` value. `PUBLIC_ORIGIN` is the worker origin with no trailing slash. `FAILURE_WEBHOOK_URL` is optional. Without the Telegram secrets the morning step logs `telegram.skipped` and does not fail the run. `DEEPSEEK_MODEL` and `DEEPSEEK_REASONING_EFFORT` are vars (`deepseek-flash`, `high`). Wrangler needs Node 22.
 
 ```bash
 yarn install
