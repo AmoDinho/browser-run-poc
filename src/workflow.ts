@@ -5,6 +5,8 @@ import { AnalysisRequestError } from "./analysis/client";
 import { ConfigError, QuotaError, captureAsset, toStepResult, type CaptureStepResult } from "./capture/browser";
 import { DAILY_TIMEFRAMES } from "./capture/config";
 import type { WorkerEnv } from "./env";
+import { isMorningPing, sendMorningDigest, type MorningAsset } from "./notify";
+import { writeBrief } from "./report/brief";
 import { instanceId, normalizeParams, type DailyParams } from "./workflow-params";
 
 export class DailyAnalysisWorkflow extends WorkflowEntrypoint<WorkerEnv, DailyParams> {
@@ -16,6 +18,7 @@ export class DailyAnalysisWorkflow extends WorkflowEntrypoint<WorkerEnv, DailyPa
 			throw new NonRetryableError(error instanceof Error ? error.message : "invalid workflow params");
 		}
 		const results: { asset: string; ok: boolean; skipped?: boolean }[] = [];
+		const outcomes: MorningAsset[] = [];
 		for (const asset of params.assets) {
 			let capture: CaptureStepResult | null = null;
 			if (params.phase === "full") {
@@ -49,6 +52,7 @@ export class DailyAnalysisWorkflow extends WorkflowEntrypoint<WorkerEnv, DailyPa
 						return { recorded: true };
 					});
 					results.push({ asset, ok: false });
+					outcomes.push({ asset, ok: false, error: message });
 					continue;
 				}
 			}
@@ -71,7 +75,24 @@ export class DailyAnalysisWorkflow extends WorkflowEntrypoint<WorkerEnv, DailyPa
 						}
 					},
 				);
-				results.push({ asset, ok: analysed.ok, skipped: analysed.skipped });
+				if (!analysed.ok) {
+					results.push({ asset, ok: false });
+					outcomes.push({ asset, ok: false, error: analysed.error ?? "analysis failed" });
+					continue;
+				}
+				try {
+					await step.do(`brief-${asset}`, { retries: { limit: 1, delay: "10 seconds" }, timeout: "1 minute" }, async () => {
+						await writeBrief(this.env, asset, params.date);
+						return { written: true };
+					});
+				} catch (error) {
+					const message = error instanceof Error ? error.message : String(error);
+					results.push({ asset, ok: false });
+					outcomes.push({ asset, ok: false, error: message });
+					continue;
+				}
+				results.push({ asset, ok: true, skipped: analysed.skipped });
+				outcomes.push({ asset, ok: true, error: null });
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
 				await step.do(`analyse-failed-${asset}`, async () => {
@@ -79,7 +100,13 @@ export class DailyAnalysisWorkflow extends WorkflowEntrypoint<WorkerEnv, DailyPa
 					return { recorded: true };
 				});
 				results.push({ asset, ok: false });
+				outcomes.push({ asset, ok: false, error: message });
 			}
+		}
+		if (isMorningPing(params.runId)) {
+			await step.do("notify-morning", { retries: { limit: 2, delay: "20 seconds", backoff: "constant" }, timeout: "1 minute" }, async () => {
+				return sendMorningDigest(this.env, params.date, outcomes);
+			});
 		}
 		return { date: params.date, runId: params.runId, results };
 	}

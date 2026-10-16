@@ -18,6 +18,10 @@ export function runKey(asset: string, date: string): string {
 	return `runs/${asset}/${date}.json`;
 }
 
+export function briefKey(asset: string, date: string): string {
+	return `briefs/${asset}/${date}.html`;
+}
+
 export async function hasKey(kv: KVNamespace, key: string): Promise<boolean> {
 	const value = await kv.get(key);
 	return value !== null;

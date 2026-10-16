@@ -25,6 +25,7 @@ export type AnalyseResult = {
 	ok: boolean;
 	skipped: boolean;
 	groundingWarning: boolean;
+	error: string | null;
 };
 
 type RunRecord = {
@@ -68,7 +69,7 @@ export async function analyseAsset(env: WorkerEnv, input: AnalyseInput): Promise
 	const notes = [...(input.capture?.notes ?? [])];
 	if (!input.force) {
 		const existing = await getText(kv, reportJsonKey(input.asset, input.date));
-		if (existing) return { ok: true, skipped: true, groundingWarning: false };
+		if (existing) return { ok: true, skipped: true, groundingWarning: false, error: null };
 	}
 	const loaded = await loadImages(kv, input.asset, input.date, input.capture);
 	const actual = loaded.map((image) => image.timeframe);
@@ -76,7 +77,7 @@ export async function analyseAsset(env: WorkerEnv, input: AnalyseInput): Promise
 		const record = emptyRun(input, started, requested, actual, notes, false, ["no screenshots in KV"]);
 		await writeRun(kv, input, record);
 		await notifyFailure(env, { runId: input.runId, asset: input.asset, date: input.date, error: "no screenshots in KV" });
-		return { ok: false, skipped: false, groundingWarning: false };
+		return { ok: false, skipped: false, groundingWarning: false, error: "no screenshots in KV" };
 	}
 	const tiny = loaded.filter((image) => pngFailsVisibility(image.bytes)).map((image) => image.timeframe);
 	if (tiny.length > 0) notes.push(`visibility failed for ${tiny.join(", ")}`);
@@ -100,7 +101,7 @@ export async function analyseAsset(env: WorkerEnv, input: AnalyseInput): Promise
 		completion = await completeChat(env, userContent);
 		if (isUnusableCompletion(completion.content, completion.finishReason)) {
 			await fail(env, input, started, requested, actual, notes, completion, "empty or truncated content");
-			return { ok: false, skipped: false, groundingWarning: false };
+			return { ok: false, skipped: false, groundingWarning: false, error: "empty or truncated content" };
 		}
 	}
 	let analysis: ChartAnalysis;
@@ -108,8 +109,9 @@ export async function analyseAsset(env: WorkerEnv, input: AnalyseInput): Promise
 		analysis = parseAnalysis(completion.content);
 	} catch (error) {
 		if (retried || !isParseError(error)) {
-			await fail(env, input, started, requested, actual, notes, completion, validationMessage(error));
-			return { ok: false, skipped: false, groundingWarning: false };
+			const detail = validationMessage(error);
+			await fail(env, input, started, requested, actual, notes, completion, detail);
+			return { ok: false, skipped: false, groundingWarning: false, error: detail };
 		}
 		retried = true;
 		const retryContent: UserPart[] = [
@@ -119,13 +121,14 @@ export async function analyseAsset(env: WorkerEnv, input: AnalyseInput): Promise
 		completion = await completeChat(env, retryContent);
 		if (isUnusableCompletion(completion.content, completion.finishReason)) {
 			await fail(env, input, started, requested, actual, notes, completion, "retry empty or truncated");
-			return { ok: false, skipped: false, groundingWarning: false };
+			return { ok: false, skipped: false, groundingWarning: false, error: "retry empty or truncated" };
 		}
 		try {
 			analysis = parseAnalysis(completion.content);
 		} catch (retryError) {
-			await fail(env, input, started, requested, actual, notes, completion, validationMessage(retryError));
-			return { ok: false, skipped: false, groundingWarning: false };
+			const detail = validationMessage(retryError);
+			await fail(env, input, started, requested, actual, notes, completion, detail);
+			return { ok: false, skipped: false, groundingWarning: false, error: detail };
 		}
 	}
 	const stamped = stamp(analysis, env, input, requested, actual, notes, hintPoor);
@@ -169,7 +172,7 @@ export async function analyseAsset(env: WorkerEnv, input: AnalyseInput): Promise
 			error: groundingWarning ? "empty method_citations" : "capture_quality poor",
 		});
 	}
-	return { ok: true, skipped: false, groundingWarning };
+	return { ok: true, skipped: false, groundingWarning, error: null };
 }
 
 function stamp(

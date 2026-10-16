@@ -20,10 +20,13 @@ The Worker name is `fx-chart-analyst` (previously `browser-run-hello-world`). De
 - `GET /reports?token=…` — report dates, newest first
 - `GET /reports/:asset/:date?token=…` — report HTML
 - `GET /reports/:asset/:date/:tf.png?token=…` — stored PNG for that date
+- `GET /brief/:asset/:date?token=…` — phone brief written after a successful analysis
 - `GET|POST /run?token=…&force=1` — capture then analyse. Cron never sends `force=1`
 - `GET|POST /analyse?token=…&asset=gold&date=YYYY-MM-DD&force=1` — re-encode PNGs from KV. No recapture
 
-Wrong or missing `token` on `/reports`, `/run`, and `/analyse` is **404**, not 401.
+The weekday cron (`cron-YYYY-MM-DD`) writes the brief, then sends one Telegram message. A manual `/run` or `/analyse` writes the brief and does not ping.
+
+Wrong or missing `token` on `/reports`, `/brief`, `/run`, and `/analyse` is **404**, not 401.
 
 ## Secrets
 
@@ -33,7 +36,7 @@ npx wrangler secret put VIEWER_TOKEN
 npx wrangler secret put FAILURE_WEBHOOK_URL
 ```
 
-`FAILURE_WEBHOOK_URL` is optional. `DEEPSEEK_MODEL` and `DEEPSEEK_REASONING_EFFORT` are vars (`deepseek-flash`, `high`). Wrangler needs Node 22.
+`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, and `PUBLIC_ORIGIN` are GitHub repo secrets. Deploy uploads them. `PUBLIC_ORIGIN` is the worker origin with no trailing slash. `FAILURE_WEBHOOK_URL` is optional. Without the Telegram secrets the morning step logs `telegram.skipped` and does not fail the run. `DEEPSEEK_MODEL` and `DEEPSEEK_REASONING_EFFORT` are vars (`deepseek-flash`, `high`). Wrangler needs Node 22.
 
 ```bash
 yarn install

@@ -3,7 +3,7 @@ import { captureScreenshot, checkLimits, cleanupSessions, readStatus } from "./c
 import type { WorkerEnv } from "./env";
 import { reportPage, reportsListPage } from "./report/html";
 import { arrayBuffer } from "./capture/visibility";
-import { getBytes, getText, listReportEntries, reportMdKey, screenshotKey } from "./storage/kv";
+import { briefKey, getBytes, getText, listReportEntries, reportMdKey, screenshotKey } from "./storage/kv";
 import { startDaily } from "./workflow";
 
 export { DailyAnalysisWorkflow } from "./workflow";
@@ -16,6 +16,7 @@ export default {
 		if (pathname === "/cleanup") return cleanup(env);
 		if (pathname === "/screenshot") return screenshot(searchParams, env);
 		if (pathname === "/latest") return latest(searchParams, env);
+		if (pathname === "/brief" || pathname.startsWith("/brief/")) return brief(url, env);
 		if (pathname === "/reports" || pathname.startsWith("/reports/")) return reports(url, env);
 		if (pathname === "/run") return trigger(url, env, "full");
 		if (pathname === "/analyse") return trigger(url, env, "analyse");
@@ -32,6 +33,7 @@ export default {
 				cleanup: "/cleanup",
 				screenshot: "/screenshot?asset=[nasdaq100|gold]&timeframe=[30m|3h|1D|1W|1M|3M|1Y]",
 				latest: "/latest?asset=[nasdaq100|gold]&timeframe=[30m|3h|1D|1W|1M|3M|1Y]",
+				brief: "/brief/:asset/:date?token=…",
 				reports: "/reports?token=…",
 				run: "/run?token=…&force=1",
 				analyse: "/analyse?token=…&asset=gold&date=YYYY-MM-DD&force=1",
@@ -98,6 +100,25 @@ async function latest(searchParams: URLSearchParams, env: WorkerEnv): Promise<Re
 	const image = await getBytes(env.CHARTS_CACHE, `${asset}/${timeframe}/latest.png`);
 	if (!image) return json({ error: `No stored screenshot found for asset '${asset}' with timeframe '${timeframe}'.` }, 404);
 	return new Response(arrayBuffer(image), { headers: { "content-type": "image/png" } });
+}
+
+async function brief(url: URL, env: WorkerEnv): Promise<Response> {
+	if (!viewerAllowed(url, env)) return notFound();
+	if (!env.CHARTS_CACHE) return notFound();
+	const parts = url.pathname.split("/").filter(Boolean);
+	const asset = parts[1] ?? "";
+	const date = parts[2] ?? "";
+	if (parts.length !== 3 || !isAsset(asset) || !isUtcDate(date)) return notFound();
+	const body = await getText(env.CHARTS_CACHE, briefKey(asset, date));
+	if (!body) return notFound();
+	return new Response(body, {
+		headers: {
+			"content-type": "text/html; charset=utf-8",
+			"x-content-type-options": "nosniff",
+			"referrer-policy": "no-referrer",
+			"cache-control": "private, no-store",
+		},
+	});
 }
 
 async function reports(url: URL, env: WorkerEnv): Promise<Response> {

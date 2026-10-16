@@ -1,3 +1,4 @@
+import { coerceAnalysis } from "./coerce";
 import { chartAnalysisSchema, type ChartAnalysis } from "./schema";
 
 export function isUnusableCompletion(content: string, finishReason: string | null): boolean {
@@ -19,5 +20,5 @@ export function parseAnalysis(content: string): ChartAnalysis {
 		if (error instanceof SyntaxError) throw error;
 		throw new SyntaxError(error instanceof Error ? error.message : "Invalid json");
 	}
-	return chartAnalysisSchema.parse(parsed);
+	return chartAnalysisSchema.parse(coerceAnalysis(parsed));
 }
