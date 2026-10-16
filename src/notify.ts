@@ -15,10 +15,6 @@ const ALARM_NAMES: Record<string, string> = {
 	nasdaq100: "NASDAQ",
 };
 
-export function isMorningPing(runId: string): boolean {
-	return runId.startsWith("cron-");
-}
-
 export function morningHeading(date: string): string {
 	const when = new Date(`${date}T07:00:00.000Z`);
 	const weekday = new Intl.DateTimeFormat("en-GB", { weekday: "short", timeZone: "Africa/Johannesburg" }).format(when);

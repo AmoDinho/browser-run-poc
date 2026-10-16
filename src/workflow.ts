@@ -5,7 +5,7 @@ import { AnalysisRequestError } from "./analysis/client";
 import { ConfigError, QuotaError, captureAsset, toStepResult, type CaptureStepResult } from "./capture/browser";
 import { DAILY_TIMEFRAMES } from "./capture/config";
 import type { WorkerEnv } from "./env";
-import { isMorningPing, sendMorningDigest, type MorningAsset } from "./notify";
+import { sendMorningDigest, type MorningAsset } from "./notify";
 import { writeBrief } from "./report/brief";
 import { instanceId, normalizeParams, type DailyParams } from "./workflow-params";
 
@@ -103,11 +103,9 @@ export class DailyAnalysisWorkflow extends WorkflowEntrypoint<WorkerEnv, DailyPa
 				outcomes.push({ asset, ok: false, error: message });
 			}
 		}
-		if (isMorningPing(params.runId)) {
-			await step.do("notify-morning", { retries: { limit: 2, delay: "20 seconds", backoff: "constant" }, timeout: "1 minute" }, async () => {
-				return sendMorningDigest(this.env, params.date, outcomes);
-			});
-		}
+		await step.do("notify-morning", { retries: { limit: 2, delay: "20 seconds", backoff: "constant" }, timeout: "1 minute" }, async () => {
+			return sendMorningDigest(this.env, params.date, outcomes);
+		});
 		return { date: params.date, runId: params.runId, results };
 	}
 }

@@ -24,7 +24,7 @@ The Worker name is `fx-chart-analyst` (previously `browser-run-hello-world`). De
 - `GET|POST /run?token=…&force=1` — capture then analyse. Cron never sends `force=1`
 - `GET|POST /analyse?token=…&asset=gold&date=YYYY-MM-DD&force=1` — re-encode PNGs from KV. No recapture
 
-The weekday cron (`cron-YYYY-MM-DD`) writes the brief, then sends one Telegram message. A manual `/run` or `/analyse` writes the brief and does not ping.
+Every workflow run, cron or manual `/run` and `/analyse`, writes the brief and then sends one Telegram message.
 
 Wrong or missing `token` on `/reports`, `/brief`, `/run`, and `/analyse` is **404**, not 401.
 

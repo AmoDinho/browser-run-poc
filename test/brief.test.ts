@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { parseAnalysis } from "../src/analysis/parse";
 import { EXAMPLE_ANALYSIS } from "../src/analysis/schema";
-import { isMorningPing, morningDigest, morningHeading } from "../src/notify";
+import { morningDigest, morningHeading } from "../src/notify";
 import { renderBrief } from "../src/report/brief";
 import { extractRange } from "../src/report/range";
 
@@ -72,8 +72,6 @@ test("a failed morning asset does not get a tokenised link", () => {
 	assert.match(text, /GOLD · no brief/);
 	assert.match(text, /no screenshots in KV/);
 	assert.equal(text.includes("secret"), false);
-	assert.equal(isMorningPing("cron-2026-10-16"), true);
-	assert.equal(isMorningPing("full-2026-10-16-1"), false);
 });
 
 test("brief html escapes model text and shows the verdict", () => {
@@ -85,7 +83,22 @@ test("brief html escapes model text and shows the verdict", () => {
 		capture: { ...EXAMPLE_ANALYSIS.capture, actual_timeframes: ["1D"] },
 	}, "a&b");
 	assert.match(html, /Stand aside/);
-	assert.equal(html.includes("<script>"), false);
-	assert.match(html, /token=a%26b/);
+	assert.equal(html.includes("<script>alert"), false);
 	assert.match(html, /\/reports\/gold\/2026-10-16\/1D\.png/);
+});
+
+test("coerces timeframe level objects into strings", () => {
+	const broken = {
+		...EXAMPLE_ANALYSIS,
+		timeframes: [{
+			timeframe: "1D",
+			structure: "up",
+			levels: [{ name: "external range high (est.)", price: 31200 }, { name: "current daily close", price: 29891.6 }],
+			wick_extremes: null,
+			notes: null,
+		}],
+	};
+	const parsed = parseAnalysis(JSON.stringify(broken));
+	assert.equal(parsed.timeframes[0]?.levels[0], "external range high (est.) 31200");
+	assert.equal(parsed.timeframes[0]?.levels[1], "current daily close 29891.6");
 });

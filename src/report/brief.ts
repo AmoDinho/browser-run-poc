@@ -18,10 +18,10 @@ export function renderBrief(analysis: ChartAnalysis, token: string): string {
 	const charts = analysis.capture.actual_timeframes
 		.map((timeframe) => {
 			const frame = analysis.timeframes.find((item) => item.timeframe === timeframe);
-			const src = `/reports/${encodeURIComponent(analysis.asset)}/${analysis.generated_at_utc.slice(0, 10)}/${encodeURIComponent(timeframe)}.png?token=${encodeURIComponent(token)}`;
+			const src = `/reports/${encodeURIComponent(analysis.asset)}/${analysis.generated_at_utc.slice(0, 10)}/${encodeURIComponent(timeframe)}.png`;
 			return `<figure>
 <figcaption>${escapeHtml(timeframe)}</figcaption>
-<img alt="${escapeHtml(`${asset} ${timeframe}`)}" src="${escapeHtml(src)}">
+<img alt="${escapeHtml(`${asset} ${timeframe}`)}" data-src="${escapeHtml(src)}">
 ${frame?.structure ? `<p>${escapeHtml(frame.structure)}</p>` : ""}
 </figure>`;
 		})
@@ -88,6 +88,14 @@ ${conflicts ? `<h2>Conflicts</h2><ul class="notes">${conflicts}</ul>` : ""}
 ${invalidation ? `<h2>Invalidation</h2><ul class="notes">${invalidation}</ul>` : ""}
 ${caveats ? `<h2>Caveats</h2><ul class="notes">${caveats}</ul>` : ""}
 </main>
+<script>
+const token = new URLSearchParams(location.search).get("token") ?? ${JSON.stringify(token)};
+for (const img of document.querySelectorAll("img[data-src]")) {
+  const src = img.getAttribute("data-src");
+  if (!src) continue;
+  img.src = token ? src + "?token=" + encodeURIComponent(token) : src;
+}
+</script>
 </body>
 </html>`;
 }

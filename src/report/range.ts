@@ -18,11 +18,18 @@ export function extractRange(analysis: ChartAnalysis): RangeRead | null {
 		.join("\n");
 	const span = text.match(/range\s+~?([\d,]+(?:\.\d+)?)\s*[–-]\s*~?([\d,]+(?:\.\d+)?)/i);
 	const spanNumbers = span ? [price(span[1] ?? ""), price(span[2] ?? "")].filter((value): value is number => value !== null) : [];
-	const high = firstPrice(text, [/range high\s+~?([\d,]+(?:\.\d+)?)/i, /swing high\s+~?([\d,]+(?:\.\d+)?)/i]) ?? (spanNumbers.length === 2 ? Math.max(...spanNumbers) : null);
-	const low = firstPrice(text, [/\blow\s+~?([\d,]+(?:\.\d+)?)/i]) ?? (spanNumbers.length === 2 ? Math.min(...spanNumbers) : null);
-	const equilibrium = firstPrice(text, [/equilibrium\s+~?([\d,]+(?:\.\d+)?)/i]);
+	const high = firstPrice(text, [
+		/external range high(?:\s*\(est\.\))?\s+~?([\d,]+(?:\.\d+)?)/i,
+		/range high(?:\s*\(est\.\))?\s+~?([\d,]+(?:\.\d+)?)/i,
+	]) ?? (spanNumbers.length === 2 ? Math.max(...spanNumbers) : null);
+	const low = firstPrice(text, [
+		/external range low(?:\s*\(est\.\))?\s+~?([\d,]+(?:\.\d+)?)/i,
+		/range low(?:\s*\(est\.\))?\s+~?([\d,]+(?:\.\d+)?)/i,
+	]) ?? firstPrice(text, [/\blow\s+~?([\d,]+(?:\.\d+)?)/i]) ?? (spanNumbers.length === 2 ? Math.min(...spanNumbers) : null);
+	const equilibrium = firstPrice(text, [/equilibrium(?:\s+of\s+external\s+range)?(?:\s*\(est\.\))?\s+~?([\d,]+(?:\.\d+)?)/i]);
 	const close = firstPrice(text, [
 		/last daily close\s+~?([\d,]+(?:\.\d+)?)/i,
+		/current daily close\s+~?([\d,]+(?:\.\d+)?)/i,
 		/current close\s+~?([\d,]+(?:\.\d+)?)/i,
 		/daily close\s+~?([\d,]+(?:\.\d+)?)/i,
 	]);
