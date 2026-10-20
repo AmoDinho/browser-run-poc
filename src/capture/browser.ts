@@ -1,6 +1,6 @@
 import puppeteer, { type Browser, type Frame, type Page } from "@cloudflare/puppeteer";
 import type { WorkerEnv } from "../env";
-import { latestKey, putBytes, screenshotKey, hasKey } from "../storage/kv";
+import { latestKey, putBytes, screenshotKey, getBytes } from "../storage/kv";
 import {
 	ASSET_URLS,
 	DAILY_TIMEFRAMES,
@@ -61,6 +61,7 @@ export type CaptureRequest = {
 	timeframes: string[];
 	force: boolean;
 	store: boolean;
+	priorHashes?: string[];
 };
 
 export function toStepResult(result: CaptureAssetResult): CaptureStepResult {
@@ -137,32 +138,8 @@ export async function captureAsset(env: WorkerEnv, request: CaptureRequest): Pro
 	if (!limit.allowed) throw new QuotaError("Daily time limit exceeded");
 	if (request.store && !env.CHARTS_CACHE) throw new ConfigError("CHARTS_CACHE namespace binding is not configured");
 	if (request.store && env.CHARTS_CACHE && !request.force) {
-		const present: string[] = [];
-		for (const timeframe of timeframes) {
-			if (await hasKey(env.CHARTS_CACHE, screenshotKey(request.asset, timeframe, request.date))) present.push(timeframe);
-		}
-		if (present.length === timeframes.length) {
-			return {
-				asset: request.asset,
-				date: request.date,
-				requestedTimeframes: timeframes,
-				actualTimeframes: present,
-				frames: present.map((timeframe) => ({
-					timeframe,
-					label: TIMEFRAME_LABELS[timeframe as Timeframe],
-					key: screenshotKey(request.asset, timeframe, request.date),
-					hash: null,
-					width: null,
-					height: null,
-					intervalVerified: true,
-					stored: true,
-					note: null,
-				})),
-				notes: ["capture skipped; dated screenshots already present"],
-				skipped: true,
-				captureQuality: "ok",
-			};
-		}
+		const cached = await readStoredFrames(env.CHARTS_CACHE, request.asset, request.date, timeframes);
+		if (cached) return cachedFramesResult(request, timeframes, cached);
 	}
 	const browser = await puppeteer.launch(env.MYBROWSER);
 	try {
@@ -188,7 +165,7 @@ async function captureInBrowser(
 	await dismissConsent(page);
 	const notes: string[] = [];
 	const frames: CapturedFrame[] = [];
-	const seen: string[] = [];
+	const seen: string[] = [...(request.priorHashes ?? [])];
 	let loneBytes: Uint8Array | undefined;
 	for (const timeframe of timeframes) {
 		try {
@@ -505,6 +482,115 @@ function concurrencyHigh(limits: unknown): boolean {
 
 function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export function mergeCaptureResults(
+	asset: string,
+	date: string,
+	requested: string[],
+	parts: CaptureStepResult[],
+): CaptureStepResult {
+	const frames = parts.flatMap((part) => part.frames);
+	const notes = parts.flatMap((part) => part.notes);
+	const actual = frames.filter((frame) => frame.stored).map((frame) => frame.timeframe);
+	const verified = frames.filter((frame) => frame.stored).every((frame) => frame.intervalVerified);
+	return {
+		asset,
+		date,
+		requestedTimeframes: requested,
+		actualTimeframes: actual,
+		frames,
+		notes,
+		skipped: parts.length > 0 && parts.every((part) => part.skipped),
+		captureQuality: actual.length === requested.length && verified ? "ok" : "poor",
+	};
+}
+
+export function missedCapture(asset: string, date: string, timeframe: string, message: string): CaptureStepResult {
+	const label = isTimeframe(timeframe) ? TIMEFRAME_LABELS[timeframe] : timeframe;
+	return {
+		asset,
+		date,
+		requestedTimeframes: [timeframe],
+		actualTimeframes: [],
+		frames: [
+			{
+				timeframe,
+				label,
+				key: null,
+				hash: null,
+				width: null,
+				height: null,
+				intervalVerified: false,
+				stored: false,
+				note: message,
+			},
+		],
+		notes: [`${timeframe}: ${message}`],
+		skipped: false,
+		captureQuality: "poor",
+	};
+}
+
+export function shouldRetryCapture(result: CaptureStepResult): boolean {
+	if (result.skipped || result.actualTimeframes.length > 0) return false;
+	return !result.notes.some((note) => note.includes("duplicate"));
+}
+
+export function isFatalCaptureMessage(message: string): boolean {
+	return (
+		message.includes("Daily time limit exceeded") ||
+		message.includes("CHARTS_CACHE") ||
+		message.startsWith("Invalid asset") ||
+		message.includes("No timeframes to capture")
+	);
+}
+
+async function readStoredFrames(
+	kv: KVNamespace,
+	asset: string,
+	date: string,
+	timeframes: Timeframe[],
+): Promise<CapturedFrame[] | null> {
+	const frames: CapturedFrame[] = [];
+	for (const timeframe of timeframes) {
+		const key = screenshotKey(asset, timeframe, date);
+		const bytes = await getBytes(kv, key);
+		if (!bytes) return null;
+		frames.push({
+			timeframe,
+			label: TIMEFRAME_LABELS[timeframe],
+			key,
+			hash: await sha256Hex(bytes),
+			width: null,
+			height: null,
+			intervalVerified: true,
+			stored: true,
+			note: null,
+		});
+	}
+	return frames;
+}
+
+function cachedFramesResult(request: CaptureRequest, timeframes: Timeframe[], cached: CapturedFrame[]): CaptureStepResult {
+	const seen = new Set(request.priorHashes ?? []);
+	const frames = cached.map((frame) => {
+		if (frame.hash && seen.has(frame.hash)) return { ...frame, stored: false, note: "duplicate hash" };
+		return frame;
+	});
+	const actual = frames.filter((frame) => frame.stored).map((frame) => frame.timeframe);
+	const notes = ["capture skipped; dated screenshots already present"];
+	if (actual.length !== timeframes.length) notes.push("interval verification failed; screenshot matched a previous timeframe");
+	return {
+		asset: request.asset,
+		date: request.date,
+		requestedTimeframes: timeframes,
+		actualTimeframes: actual,
+		frames,
+		notes,
+		skipped: actual.length === timeframes.length,
+		captureQuality: actual.length === timeframes.length ? "ok" : "poor",
+	};
 }
 
 export const DEFAULT_TIMEFRAMES = DAILY_TIMEFRAMES;

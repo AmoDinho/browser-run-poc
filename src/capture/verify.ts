@@ -1,5 +1,4 @@
 import { INTERVAL_BUTTON_TOKENS, TIMEFRAME_FALLBACK, TIMEFRAME_LABELS, isTimeframe } from "./config";
-import { arrayBuffer } from "./visibility";
 
 export function intervalLabelMatches(readback: string, timeframe: string, fullLabel: string): boolean {
 	const raw = readback.toLowerCase();
@@ -38,8 +37,12 @@ export function resolveTimeframeChoice(
 }
 
 export async function sha256Hex(bytes: Uint8Array): Promise<string> {
-	const digest = await crypto.subtle.digest("SHA-256", arrayBuffer(bytes));
-	return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+	const tight = bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength && bytes.buffer instanceof ArrayBuffer;
+	const data = tight ? bytes.buffer : bytes.slice().buffer;
+	const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", data));
+	let hex = "";
+	for (const byte of digest) hex += byte.toString(16).padStart(2, "0");
+	return hex;
 }
 
 function menuHas(menuLabels: readonly string[], label: string): boolean {

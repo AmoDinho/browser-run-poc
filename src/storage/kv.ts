@@ -18,6 +18,10 @@ export function runKey(asset: string, date: string): string {
 	return `runs/${asset}/${date}.json`;
 }
 
+export function completionDraftKey(asset: string, date: string): string {
+	return `drafts/${asset}/${date}/completion.json`;
+}
+
 export function briefKey(asset: string, date: string): string {
 	return `briefs/${asset}/${date}.html`;
 }

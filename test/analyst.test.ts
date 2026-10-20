@@ -5,8 +5,9 @@ import { chartAnalysisSchema, EXAMPLE_ANALYSIS, exampleJson } from "../src/analy
 import { extractJson, isUnusableCompletion, parseAnalysis } from "../src/analysis/parse";
 import { buildChatRequest, buildUserContent } from "../src/analysis/request";
 import { markdownH2 } from "../src/analysis/sections";
+import { isFatalCaptureMessage, mergeCaptureResults, missedCapture, shouldRetryCapture } from "../src/capture/browser";
 import { isChartBoxVisible, pngSize } from "../src/capture/visibility";
-import { intervalLabelMatches, isDuplicateHash, resolveTimeframeChoice } from "../src/capture/verify";
+import { intervalLabelMatches, isDuplicateHash, resolveTimeframeChoice, sha256Hex } from "../src/capture/verify";
 import { markdownToHtml } from "../src/report/html";
 import { DISCLAIMER, renderReport } from "../src/report/render";
 import { normalizeParams } from "../src/workflow-params";
@@ -27,6 +28,49 @@ test("rejects a deliberately tiny chart image", () => {
 test("does not accept a repeated screenshot hash", () => {
 	assert.equal(isDuplicateHash("abc", ["abc"]), true);
 	assert.equal(isDuplicateHash("def", ["abc"]), false);
+});
+
+test("hashes a byte view without the surrounding buffer", async () => {
+	const packed = new Uint8Array([1, 2, 3, 4, 5]);
+	const view = packed.subarray(1, 4);
+	const exact = new Uint8Array([2, 3, 4]);
+	assert.equal(await sha256Hex(view), await sha256Hex(exact));
+	assert.notEqual(await sha256Hex(view), await sha256Hex(packed));
+});
+
+test("merges per-timeframe captures and does not retry a duplicate miss", () => {
+	const merged = mergeCaptureResults("gold", "2026-10-12", ["1D", "30m"], [
+		{
+			asset: "gold",
+			date: "2026-10-12",
+			requestedTimeframes: ["1D"],
+			actualTimeframes: ["1D"],
+			frames: [
+				{
+					timeframe: "1D",
+					label: "1 day",
+					key: "gold/1D/2026-10-12.png",
+					hash: "abc",
+					width: 800,
+					height: 400,
+					intervalVerified: true,
+					stored: true,
+					note: null,
+				},
+			],
+			notes: [],
+			skipped: false,
+			captureQuality: "ok",
+		},
+		missedCapture("gold", "2026-10-12", "30m", "duplicate hash"),
+	]);
+	assert.deepEqual(merged.actualTimeframes, ["1D"]);
+	assert.equal(merged.captureQuality, "poor");
+	assert.equal(merged.skipped, false);
+	assert.equal(shouldRetryCapture(missedCapture("gold", "2026-10-12", "30m", "duplicate hash")), false);
+	assert.equal(shouldRetryCapture(missedCapture("gold", "2026-10-12", "30m", "chart box missing")), true);
+	assert.equal(isFatalCaptureMessage("Daily time limit exceeded"), true);
+	assert.equal(isFatalCaptureMessage("chart box missing"), false);
 });
 
 test("falls back from 3h to 30m only when the label is absent and unused", () => {

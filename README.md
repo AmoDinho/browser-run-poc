@@ -7,6 +7,7 @@ The Worker name is `fx-chart-analyst` (previously `browser-run-hello-world`). De
 ## Decisions
 
 - Timeframes per asset: `1D`, `30m`, `3h`. `15m` is not in the widget label map, so it is not requested. If `3 hours` is absent, capture falls back to `30 minutes` and records that.
+- Worker CPU limit is 5 minutes (`limits.cpu_ms`). Each timeframe is its own workflow step. Analysis is prepare, then chat, then parse, so a model retry does not share a CPU budget with parsing. Screenshots stay PNG.
 - Both `nasdaq100` and `gold` run on the weekday cron.
 - Model is `deepseek-flash` only. Vision calls are raw `POST https://api.deepseek.com/chat/completions`.
 - `knowledge/methodology.md` is the decision procedure (order-flow prompt). `knowledge/context.md` is separate reference notes. Both are loaded into the system message. The decision procedure wins if they conflict.

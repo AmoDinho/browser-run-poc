@@ -37,6 +37,9 @@
 			"enabled": true
 		}
 	},
+	"limits": {
+		"cpu_ms": 300000
+	},
 	"rules": [
 		{
 			"type": "Text",

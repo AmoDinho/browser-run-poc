@@ -6,7 +6,7 @@ import type { CaptureStepResult } from "../capture/browser";
 import type { WorkerEnv } from "../env";
 import { notifyFailure } from "../notify";
 import { renderReport } from "../report/render";
-import { getBytes, getText, putText, reportJsonKey, reportMdKey, runKey, screenshotKey } from "../storage/kv";
+import { completionDraftKey, getBytes, getText, putText, reportJsonKey, reportMdKey, runKey, screenshotKey } from "../storage/kv";
 import { AnalysisRequestError, completeChat, resolveModel } from "./client";
 import { isUnusableCompletion, parseAnalysis } from "./parse";
 import { CITABLE_SECTIONS, PROMPT_VERSION } from "./prompt";
@@ -26,6 +26,41 @@ export type AnalyseResult = {
 	skipped: boolean;
 	groundingWarning: boolean;
 	error: string | null;
+};
+
+export type PrepareResult = {
+	ok: boolean;
+	skipped: boolean;
+	error: string | null;
+	requested: string[];
+	actual: string[];
+	notes: string[];
+	hintPoor: boolean;
+	started: number;
+};
+
+export type ChatStepResult = {
+	ok: boolean;
+	unusable: boolean;
+	error: string | null;
+};
+
+export type ParseStepResult = AnalyseResult & {
+	needsRetry: boolean;
+};
+
+type StoredCompletion = {
+	content: string;
+	reasoningContent: string | null;
+	finishReason: string | null;
+	usage: RunRecord["usage"];
+};
+
+const EMPTY_COMPLETION: StoredCompletion = {
+	content: "",
+	reasoningContent: null,
+	finishReason: null,
+	usage: null,
 };
 
 type RunRecord = {
@@ -61,7 +96,11 @@ export async function recordTerminalFailure(env: WorkerEnv, input: AnalyseInput,
 	await notifyFailure(env, { runId: input.runId, asset: input.asset, date: input.date, error });
 }
 
-export async function analyseAsset(env: WorkerEnv, input: AnalyseInput): Promise<AnalyseResult> {
+export function correctionText(detail: string): string {
+	return `The previous json failed validation: ${detail}\nReturn one corrected json object. No markdown fence.`;
+}
+
+export async function prepareAnalysis(env: WorkerEnv, input: AnalyseInput): Promise<PrepareResult> {
 	const started = Date.now();
 	const kv = env.CHARTS_CACHE;
 	if (!kv) throw new AnalysisRequestError("CHARTS_CACHE namespace binding is not configured", false);
@@ -69,69 +108,103 @@ export async function analyseAsset(env: WorkerEnv, input: AnalyseInput): Promise
 	const notes = [...(input.capture?.notes ?? [])];
 	if (!input.force) {
 		const existing = await getText(kv, reportJsonKey(input.asset, input.date));
-		if (existing) return { ok: true, skipped: true, groundingWarning: false, error: null };
+		if (existing) {
+			return { ok: true, skipped: true, error: null, requested, actual: [], notes, hintPoor: false, started };
+		}
 	}
 	const loaded = await loadImages(kv, input.asset, input.date, input.capture);
 	const actual = loaded.map((image) => image.timeframe);
 	if (loaded.length === 0) {
-		const record = emptyRun(input, started, requested, actual, notes, false, ["no screenshots in KV"]);
-		await writeRun(kv, input, record);
-		await notifyFailure(env, { runId: input.runId, asset: input.asset, date: input.date, error: "no screenshots in KV" });
-		return { ok: false, skipped: false, groundingWarning: false, error: "no screenshots in KV" };
+		await fail(env, input, started, requested, actual, notes, EMPTY_COMPLETION, "no screenshots in KV");
+		return { ok: false, skipped: false, error: "no screenshots in KV", requested, actual, notes, hintPoor: true, started };
 	}
 	const tiny = loaded.filter((image) => pngFailsVisibility(image.bytes)).map((image) => image.timeframe);
 	if (tiny.length > 0) notes.push(`visibility failed for ${tiny.join(", ")}`);
 	const hintPoor = input.capture?.captureQuality === "poor" || loaded.length < 3 || tiny.length > 0;
+	return { ok: true, skipped: false, error: null, requested, actual, notes, hintPoor, started };
+}
+
+export async function completeAnalysisChat(
+	env: WorkerEnv,
+	input: AnalyseInput,
+	prepared: PrepareResult,
+	correction: string | null,
+): Promise<ChatStepResult> {
+	const kv = env.CHARTS_CACHE;
+	if (!kv) throw new AnalysisRequestError("CHARTS_CACHE namespace binding is not configured", false);
+	const loaded = await loadImages(kv, input.asset, input.date, input.capture);
+	if (loaded.length === 0) {
+		await fail(env, input, prepared.started, prepared.requested, prepared.actual, prepared.notes, EMPTY_COMPLETION, "no screenshots in KV");
+		return { ok: false, unusable: false, error: "no screenshots in KV" };
+	}
 	const images = loaded.map((image) => ({
 		label: isTimeframe(image.timeframe) ? TIMEFRAME_LABELS[image.timeframe] : image.timeframe,
 		base64: Buffer.from(image.bytes).toString("base64"),
 		timeframe: image.timeframe,
 	}));
-	const userContent = buildUserContent(images, buildRunContext({
+	const userContent: UserPart[] = buildUserContent(images, buildRunContext({
 		asset: input.asset,
 		date: input.date,
-		requested,
-		actual,
-		notes,
+		requested: prepared.requested,
+		actual: prepared.actual,
+		notes: prepared.notes,
 	}));
-	let retried = false;
-	let completion = await completeChat(env, userContent);
-	if (isUnusableCompletion(completion.content, completion.finishReason)) {
-		retried = true;
-		completion = await completeChat(env, userContent);
-		if (isUnusableCompletion(completion.content, completion.finishReason)) {
-			await fail(env, input, started, requested, actual, notes, completion, "empty or truncated content");
-			return { ok: false, skipped: false, groundingWarning: false, error: "empty or truncated content" };
-		}
+	if (correction) userContent.push({ type: "text", text: correction });
+	const completion = await completeChat(env, userContent);
+	const stored: StoredCompletion = {
+		content: completion.content,
+		reasoningContent: completion.reasoningContent,
+		finishReason: completion.finishReason,
+		usage: completion.usage,
+	};
+	await putText(kv, completionDraftKey(input.asset, input.date), JSON.stringify(stored));
+	const unusable = isUnusableCompletion(completion.content, completion.finishReason);
+	return { ok: !unusable, unusable, error: unusable ? "empty or truncated content" : null };
+}
+
+export async function recordUnusable(
+	env: WorkerEnv,
+	input: AnalyseInput,
+	prepared: PrepareResult,
+	error: string,
+): Promise<void> {
+	const kv = env.CHARTS_CACHE;
+	const stored = kv ? await readCompletion(kv, input.asset, input.date) : null;
+	await fail(env, input, prepared.started, prepared.requested, prepared.actual, prepared.notes, stored ?? EMPTY_COMPLETION, error);
+	if (kv) await kv.delete(completionDraftKey(input.asset, input.date));
+}
+
+export async function persistAnalysis(
+	env: WorkerEnv,
+	input: AnalyseInput,
+	prepared: PrepareResult,
+	allowRetry: boolean,
+): Promise<ParseStepResult> {
+	const kv = env.CHARTS_CACHE;
+	if (!kv) throw new AnalysisRequestError("CHARTS_CACHE namespace binding is not configured", false);
+	const stored = await readCompletion(kv, input.asset, input.date);
+	if (!stored) {
+		await fail(env, input, prepared.started, prepared.requested, prepared.actual, prepared.notes, EMPTY_COMPLETION, "missing completion");
+		return { ok: false, skipped: false, groundingWarning: false, error: "missing completion", needsRetry: false };
+	}
+	if (isUnusableCompletion(stored.content, stored.finishReason)) {
+		await fail(env, input, prepared.started, prepared.requested, prepared.actual, prepared.notes, stored, "empty or truncated content");
+		await kv.delete(completionDraftKey(input.asset, input.date));
+		return { ok: false, skipped: false, groundingWarning: false, error: "empty or truncated content", needsRetry: false };
 	}
 	let analysis: ChartAnalysis;
 	try {
-		analysis = parseAnalysis(completion.content);
+		analysis = parseAnalysis(stored.content);
 	} catch (error) {
-		if (retried || !isParseError(error)) {
-			const detail = validationMessage(error);
-			await fail(env, input, started, requested, actual, notes, completion, detail);
-			return { ok: false, skipped: false, groundingWarning: false, error: detail };
+		const detail = validationMessage(error);
+		if (allowRetry && isParseError(error)) {
+			return { ok: false, skipped: false, groundingWarning: false, error: detail, needsRetry: true };
 		}
-		retried = true;
-		const retryContent: UserPart[] = [
-			...userContent,
-			{ type: "text", text: `The previous json failed validation: ${validationMessage(error)}\nReturn one corrected json object. No markdown fence.` },
-		];
-		completion = await completeChat(env, retryContent);
-		if (isUnusableCompletion(completion.content, completion.finishReason)) {
-			await fail(env, input, started, requested, actual, notes, completion, "retry empty or truncated");
-			return { ok: false, skipped: false, groundingWarning: false, error: "retry empty or truncated" };
-		}
-		try {
-			analysis = parseAnalysis(completion.content);
-		} catch (retryError) {
-			const detail = validationMessage(retryError);
-			await fail(env, input, started, requested, actual, notes, completion, detail);
-			return { ok: false, skipped: false, groundingWarning: false, error: detail };
-		}
+		await fail(env, input, prepared.started, prepared.requested, prepared.actual, prepared.notes, stored, detail);
+		await kv.delete(completionDraftKey(input.asset, input.date));
+		return { ok: false, skipped: false, groundingWarning: false, error: detail, needsRetry: false };
 	}
-	const stamped = stamp(analysis, env, input, requested, actual, notes, hintPoor);
+	const stamped = stamp(analysis, env, input, prepared.requested, prepared.actual, prepared.notes, prepared.hintPoor);
 	const validated = chartAnalysisSchema.parse(stamped);
 	const unknown = validated.method_citations.map((item) => item.section).filter((section) => !CITABLE_SECTIONS.includes(section));
 	const groundingWarning = validated.capture.capture_quality !== "poor" && validated.method_citations.length === 0;
@@ -142,26 +215,27 @@ export async function analyseAsset(env: WorkerEnv, input: AnalyseInput): Promise
 	await putText(kv, reportJsonKey(input.asset, input.date), JSON.stringify(validated));
 	await putText(kv, reportMdKey(input.asset, input.date), renderReport(validated));
 	await writeRun(kv, input, {
-		...emptyRun(input, started, requested, actual, notes, false, errors),
-		usage: completion.usage,
-		prompt_cache_hit_tokens: completion.usage.prompt_cache_hit_tokens,
-		prompt_cache_miss_tokens: completion.usage.prompt_cache_miss_tokens,
-		reasoning_content: completion.reasoningContent,
-		finish_reason: completion.finishReason,
+		...emptyRun(input, prepared.started, prepared.requested, prepared.actual, prepared.notes, false, errors),
+		usage: stored.usage,
+		prompt_cache_hit_tokens: stored.usage?.prompt_cache_hit_tokens ?? null,
+		prompt_cache_miss_tokens: stored.usage?.prompt_cache_miss_tokens ?? null,
+		reasoning_content: stored.reasoningContent,
+		finish_reason: stored.finishReason,
 		content: null,
 		grounding_warning: groundingWarning,
 		unknown_sections: unknown,
 		capture_quality: validated.capture.capture_quality,
-		keys: actual.map((timeframe) => screenshotKey(input.asset, timeframe, input.date)),
+		keys: prepared.actual.map((timeframe) => screenshotKey(input.asset, timeframe, input.date)),
 	});
+	await kv.delete(completionDraftKey(input.asset, input.date));
 	console.log(JSON.stringify({
 		event: "analyse.done",
 		runId: input.runId,
 		asset: input.asset,
 		date: input.date,
-		finish_reason: completion.finishReason,
-		prompt_cache_hit_tokens: completion.usage.prompt_cache_hit_tokens,
-		prompt_cache_miss_tokens: completion.usage.prompt_cache_miss_tokens,
+		finish_reason: stored.finishReason,
+		prompt_cache_hit_tokens: stored.usage?.prompt_cache_hit_tokens ?? null,
+		prompt_cache_miss_tokens: stored.usage?.prompt_cache_miss_tokens ?? null,
 		grounding_warning: groundingWarning,
 	}));
 	if (groundingWarning || validated.capture.capture_quality === "poor") {
@@ -172,7 +246,50 @@ export async function analyseAsset(env: WorkerEnv, input: AnalyseInput): Promise
 			error: groundingWarning ? "empty method_citations" : "capture_quality poor",
 		});
 	}
-	return { ok: true, skipped: false, groundingWarning, error: null };
+	return { ok: true, skipped: false, groundingWarning, error: null, needsRetry: false };
+}
+
+export async function analyseAsset(env: WorkerEnv, input: AnalyseInput): Promise<AnalyseResult> {
+	const prepared = await prepareAnalysis(env, input);
+	if (!prepared.ok || prepared.skipped) {
+		return { ok: prepared.ok, skipped: prepared.skipped, groundingWarning: false, error: prepared.error };
+	}
+	let chat = await completeAnalysisChat(env, input, prepared, null);
+	let retried = false;
+	if (chat.unusable) {
+		retried = true;
+		chat = await completeAnalysisChat(env, input, prepared, null);
+		if (chat.unusable) {
+			await recordUnusable(env, input, prepared, "empty or truncated content");
+			return { ok: false, skipped: false, groundingWarning: false, error: "empty or truncated content" };
+		}
+	}
+	if (!chat.ok) return { ok: false, skipped: false, groundingWarning: false, error: chat.error };
+	let parsed = await persistAnalysis(env, input, prepared, !retried);
+	if (!parsed.needsRetry) {
+		return { ok: parsed.ok, skipped: parsed.skipped, groundingWarning: parsed.groundingWarning, error: parsed.error };
+	}
+	const corrected = await completeAnalysisChat(env, input, prepared, correctionText(parsed.error ?? "validation failed"));
+	if (corrected.unusable) {
+		await recordUnusable(env, input, prepared, "retry empty or truncated");
+		return { ok: false, skipped: false, groundingWarning: false, error: "retry empty or truncated" };
+	}
+	if (!corrected.ok) return { ok: false, skipped: false, groundingWarning: false, error: corrected.error };
+	parsed = await persistAnalysis(env, input, prepared, false);
+	return { ok: parsed.ok, skipped: parsed.skipped, groundingWarning: parsed.groundingWarning, error: parsed.error };
+}
+
+async function readCompletion(kv: KVNamespace, asset: string, date: string): Promise<StoredCompletion | null> {
+	const text = await getText(kv, completionDraftKey(asset, date));
+	if (!text) return null;
+	const parsed = JSON.parse(text) as StoredCompletion;
+	if (!parsed || typeof parsed.content !== "string") return null;
+	return {
+		content: parsed.content,
+		reasoningContent: parsed.reasoningContent ?? null,
+		finishReason: parsed.finishReason ?? null,
+		usage: parsed.usage ?? null,
+	};
 }
 
 function stamp(
