@@ -18,15 +18,16 @@ export type ChatRequest = {
 };
 
 export function buildUserContent(
-	images: { label: string; base64: string }[],
+	images: { label: string; base64: string; mime?: "image/png" | "image/jpeg" }[],
 	runContext: string,
 ): UserPart[] {
 	const parts: UserPart[] = [];
 	images.forEach((image, index) => {
+		const mime = image.mime ?? "image/png";
 		parts.push({ type: "text", text: `Image ${index + 1} of ${images.length} — ${image.label}` });
 		parts.push({
 			type: "image_url",
-			image_url: { url: `data:image/png;base64,${image.base64}`, detail: "original" },
+			image_url: { url: `data:${mime};base64,${image.base64}`, detail: "original" },
 		});
 	});
 	parts.push({ type: "text", text: runContext });

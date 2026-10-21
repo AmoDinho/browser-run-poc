@@ -2,6 +2,10 @@ export function screenshotKey(asset: string, timeframe: string, date: string): s
 	return `${asset}/${timeframe}/${date}.png`;
 }
 
+export function modelImageKey(asset: string, timeframe: string, date: string): string {
+	return `${asset}/${timeframe}/${date}.model.jpg`;
+}
+
 export function latestKey(asset: string, timeframe: string): string {
 	return `${asset}/${timeframe}/latest.png`;
 }

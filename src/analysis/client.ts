@@ -1,4 +1,5 @@
 import { SYSTEM_PROMPT } from "./prompt";
+import { REASONING_CAP, capReasoningPayload } from "./reasoning";
 import { buildChatRequest, type UserPart } from "./request";
 import type { WorkerEnv } from "../env";
 
@@ -90,7 +91,8 @@ export async function completeChat(env: WorkerEnv, userContent: UserPart[]): Pro
 			response.status === 429 || response.status >= 500,
 		);
 	}
-	const payload = (await response.json()) as ApiResponse;
+	const raw = await response.text();
+	const payload = parseCompletion(raw);
 	const choice = payload.choices?.[0];
 	return {
 		content: choice?.message?.content ?? "",
@@ -104,4 +106,18 @@ export async function completeChat(env: WorkerEnv, userContent: UserPart[]): Pro
 			prompt_cache_miss_tokens: payload.usage?.prompt_cache_miss_tokens ?? null,
 		},
 	};
+}
+
+function parseCompletion(raw: string): ApiResponse {
+	let payload: ApiResponse;
+	try {
+		payload = JSON.parse(capReasoningPayload(raw)) as ApiResponse;
+	} catch {
+		payload = JSON.parse(raw) as ApiResponse;
+	}
+	const message = payload.choices?.[0]?.message;
+	if (message?.reasoning_content && message.reasoning_content.length > REASONING_CAP) {
+		message.reasoning_content = message.reasoning_content.slice(0, REASONING_CAP);
+	}
+	return payload;
 }

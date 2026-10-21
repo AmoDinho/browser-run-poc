@@ -9,6 +9,8 @@ import {
 	isTimeframe,
 	type Timeframe,
 } from "./config";
+import { logEvent } from "../observe";
+import { blockedUrlPatterns, shouldAbortRequest } from "./requests";
 import { clipBox, isChartBoxVisible, pngFailsVisibility, pngSize, type Box } from "./visibility";
 import { intervalLabelMatches, isDuplicateHash, resolveTimeframeChoice, sha256Hex } from "./verify";
 
@@ -161,6 +163,7 @@ async function captureInBrowser(
 ): Promise<CaptureAssetResult> {
 	const page = await browser.newPage();
 	await page.setViewport({ width: 1440, height: 900 });
+	await armRequestFilter(page);
 	await page.goto(ASSET_URLS[request.asset as keyof typeof ASSET_URLS], { waitUntil: "domcontentloaded", timeout: 30000 });
 	await dismissConsent(page);
 	const notes: string[] = [];
@@ -436,30 +439,77 @@ async function clickLabel(frame: Frame, label: string): Promise<boolean> {
 	}, label);
 }
 
+const OVERLAY_SELECTOR = [
+	"[class*='fc-consent']",
+	"[class*='qc-cmp']",
+	"#ez-accept-all",
+	"[id^='sp_message']",
+	".adblock-wall",
+	"[id*='onetrust']",
+	"[class*='onetrust']",
+	"[id*='cookie']",
+	"[class*='cookie']",
+	"[id*='consent']",
+	"[class*='consent']",
+	"iframe[src*='doubleclick']",
+	"iframe[src*='googlesyndication']",
+].join(",");
+
 async function dismissConsent(page: Page): Promise<void> {
 	try {
-		await page.evaluate(() => {
+		await page.evaluate((selector) => {
 			const style = document.createElement("style");
 			style.textContent = `
 				[class*="fc-consent"], [class*="qc-cmp"], #ez-accept-all,
-				[id^="sp_message"], .adblock-wall, [style*="z-index: 2"] {
+				[id^="sp_message"], .adblock-wall, [id*="onetrust"], [class*="onetrust"],
+				[id*="consent"], [class*="consent"], [id*="cookie"], [class*="cookie"] {
 					display: none !important;
 					visibility: hidden !important;
 				}
 			`;
 			document.head.appendChild(style);
-			document.querySelectorAll("*").forEach((el) => {
-				const computed = window.getComputedStyle(el);
-				if ((computed.position === "fixed" || computed.position === "sticky") && Number(computed.zIndex) > 10) {
-					if (el instanceof HTMLElement) el.style.display = "none";
-				}
+			document.querySelectorAll(selector).forEach((el) => {
+				if (el instanceof HTMLElement) el.style.setProperty("display", "none", "important");
 			});
 			document.body.style.overflow = "auto";
 			document.documentElement.style.overflow = "auto";
-		});
+		}, OVERLAY_SELECTOR);
 		await sleep(3000);
 	} catch {
 		// stylesheet injection failure
+	}
+}
+
+async function armRequestFilter(page: Page): Promise<void> {
+	if (await blockInBrowser(page)) return;
+	try {
+		await page.setRequestInterception(true);
+	} catch (error) {
+		logEvent("capture.intercept.unavailable", { message: error instanceof Error ? error.message : String(error) });
+		return;
+	}
+	page.on("request", (request) => {
+		const abort = shouldAbortRequest(request.url(), request.resourceType());
+		const pending = abort ? request.abort() : request.continue();
+		void pending.catch((error: unknown) => {
+			logEvent("capture.intercept.failed", { message: error instanceof Error ? error.message : String(error) });
+		});
+	});
+}
+
+async function blockInBrowser(page: Page): Promise<boolean> {
+	try {
+		const client = await page.createCDPSession();
+		const send = client.send.bind(client) as (method: string, params?: object) => Promise<unknown>;
+		await send("Network.setBlockedURLs", { urls: blockedUrlPatterns() });
+		page.once("close", () => {
+			void client.detach().catch(() => undefined);
+		});
+		logEvent("capture.blocklist", { patterns: blockedUrlPatterns().length });
+		return true;
+	} catch (error) {
+		logEvent("capture.blocklist.unavailable", { message: error instanceof Error ? error.message : String(error) });
+		return false;
 	}
 }
 
