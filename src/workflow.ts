@@ -24,11 +24,13 @@ import {
 	toStepResult,
 	type CaptureStepResult,
 } from "./capture/browser";
-import { DAILY_TIMEFRAMES } from "./capture/config";
+import { compressModelImage } from "./analysis/images";
+import { DAILY_TIMEFRAMES, type Asset } from "./capture/config";
 import type { WorkerEnv } from "./env";
+import { exceededCpu, logEvent } from "./observe";
 import { sendMorningDigest, type MorningAsset } from "./notify";
 import { writeBrief } from "./report/brief";
-import { instanceId, normalizeParams, type DailyParams } from "./workflow-params";
+import { instanceId, normalizeParams, runIdFor, type DailyParams } from "./workflow-params";
 
 const CHAT_STEP = { retries: { limit: 1, delay: "30 seconds", backoff: "constant" }, timeout: "10 minutes" } as const;
 const PARSE_STEP = { retries: { limit: 1, delay: "10 seconds", backoff: "constant" }, timeout: "2 minutes" } as const;
@@ -80,6 +82,12 @@ export class DailyAnalysisWorkflow extends WorkflowEntrypoint<WorkerEnv, DailyPa
 				outcomes.push({ asset, ok: true, error: null });
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
+				logEvent(exceededCpu(message) ? "cpu.exceeded" : "analyse.step.failed", {
+					asset,
+					date: params.date,
+					runId: params.runId,
+					message,
+				});
 				await step.do(`analyse-failed-${asset}`, async () => {
 					await recordTerminalFailure(this.env, { asset, date: params.date, force: params.force, runId: params.runId, capture }, message);
 					return { recorded: true };
@@ -110,6 +118,7 @@ async function captureAssetSteps(
 				`capture-${asset}-${timeframe}`,
 				{ retries: { limit: 2, delay: "20 seconds", backoff: "exponential" }, timeout: "4 minutes" },
 				async () => {
+					logEvent("step.start", { step: `capture-${asset}-${timeframe}`, asset, timeframe, date: params.date, runId: params.runId });
 					try {
 						const result = await captureAsset(env, {
 							asset,
@@ -135,6 +144,14 @@ async function captureAssetSteps(
 			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
+			logEvent(exceededCpu(message) ? "cpu.exceeded" : "capture.step.failed", {
+				step: `capture-${asset}-${timeframe}`,
+				asset,
+				timeframe,
+				date: params.date,
+				runId: params.runId,
+				message,
+			});
 			parts.push(missedCapture(asset, params.date, timeframe, message));
 			if (isFatalCaptureMessage(message)) break;
 		}
@@ -158,11 +175,25 @@ async function analyseAssetSteps(
 	if (!prepared.ok || prepared.skipped) {
 		return { ok: prepared.ok, skipped: prepared.skipped, groundingWarning: false, error: prepared.error };
 	}
-	let chat = await step.do(`analyse-chat-${asset}`, CHAT_STEP, () => chatStep(env, input, prepared, null));
+	for (const timeframe of prepared.actual) {
+		await step.do(
+			`compress-${asset}-${timeframe}`,
+			{ retries: { limit: 1, delay: "10 seconds" }, timeout: "1 minute" },
+			() => {
+				logEvent("step.start", { step: `compress-${asset}-${timeframe}`, asset, timeframe, date: params.date, runId: params.runId });
+				return compressModelImage(env, asset, params.date, timeframe, params.force);
+			},
+		);
+	}
+	let chat = await step.do(`analyse-chat-${asset}`, CHAT_STEP, () => {
+		logEvent("step.start", { step: `analyse-chat-${asset}`, asset, date: params.date, runId: params.runId });
+		return chatStep(env, input, prepared, null);
+	});
 	let retried = false;
 	if (chat.unusable) {
 		retried = true;
 		chat = await step.do(`analyse-chat-retry-${asset}`, CHAT_STEP, async () => {
+			logEvent("step.start", { step: `analyse-chat-retry-${asset}`, asset, date: params.date, runId: params.runId });
 			const result = await chatStep(env, input, prepared, null);
 			if (result.unusable) await recordUnusable(env, input, prepared, "empty or truncated content");
 			return result;
@@ -175,6 +206,7 @@ async function analyseAssetSteps(
 	if (parsed.needsRetry) {
 		const detail = parsed.error ?? "validation failed";
 		const corrected = await step.do(`analyse-chat-correct-${asset}`, CHAT_STEP, async () => {
+			logEvent("step.start", { step: `analyse-chat-correct-${asset}`, asset, date: params.date, runId: params.runId });
 			const result = await chatStep(env, input, prepared, correctionText(detail));
 			if (result.unusable) await recordUnusable(env, input, prepared, "retry empty or truncated");
 			return result;
@@ -203,6 +235,24 @@ async function guardAnalysis<T>(fn: () => Promise<T>): Promise<T> {
 		if (error instanceof AnalysisRequestError && !error.retryable) throw new NonRetryableError(error.message);
 		throw error;
 	}
+}
+
+export async function startEach(
+	env: WorkerEnv,
+	input: { date: string; force: boolean; assets: Asset[]; phase: DailyParams["phase"] },
+): Promise<{ asset: Asset; id: string; created: boolean }[]> {
+	const started: { asset: Asset; id: string; created: boolean }[] = [];
+	for (const asset of input.assets) {
+		const one = await startDaily(env, {
+			date: input.date,
+			force: input.force,
+			assets: [asset],
+			phase: input.phase,
+			runId: runIdFor(input.phase, input.date, input.force, asset),
+		});
+		started.push({ asset, ...one });
+	}
+	return started;
 }
 
 export async function startDaily(env: WorkerEnv, params: DailyParams): Promise<{ id: string; created: boolean }> {

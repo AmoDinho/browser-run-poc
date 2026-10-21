@@ -4,7 +4,9 @@ import type { WorkerEnv } from "./env";
 import { reportPage, reportsListPage } from "./report/html";
 import { arrayBuffer } from "./capture/visibility";
 import { briefKey, getBytes, getText, listReportEntries, reportMdKey, screenshotKey } from "./storage/kv";
-import { startDaily } from "./workflow";
+import { exceededCpu, logEvent } from "./observe";
+import { assetForCron } from "./workflow-params";
+import { startEach } from "./workflow";
 
 export { DailyAnalysisWorkflow } from "./workflow";
 
@@ -22,7 +24,7 @@ export default {
 		if (pathname === "/analyse") return trigger(url, env, "analyse");
 		return json({
 			message: "FX Daily Chart Worker is ready.",
-			schedule: "07:00 UTC Mon-Fri",
+			schedule: "07:00 UTC Nasdaq, 07:10 UTC gold, Mon-Fri",
 			decisions: {
 				timeframes: DAILY_TIMEFRAMES,
 				assets: ["nasdaq100", "gold"],
@@ -42,22 +44,27 @@ export default {
 	},
 	async scheduled(event, env, ctx): Promise<void> {
 		const date = new Date(event.scheduledTime).toISOString().slice(0, 10);
-		ctx.waitUntil(startScheduled(env, date));
+		ctx.waitUntil(startScheduled(env, date, event.cron));
 	},
 } satisfies ExportedHandler<WorkerEnv>;
 
-async function startScheduled(env: WorkerEnv, date: string): Promise<void> {
+async function startScheduled(env: WorkerEnv, date: string, cron: string): Promise<void> {
+	const asset = assetForCron(cron);
+	if (!asset) {
+		logEvent("cron.ignored", { date, cron });
+		return;
+	}
 	try {
-		const started = await startDaily(env, {
+		const started = await startEach(env, {
 			date,
 			force: false,
-			assets: ["nasdaq100", "gold"],
+			assets: [asset],
 			phase: "full",
-			runId: `cron-${date}`,
 		});
-		console.log(JSON.stringify({ event: "cron.started", ...started, date }));
+		logEvent("cron.started", { date, cron, asset, started });
 	} catch (error) {
-		console.error(JSON.stringify({ event: "cron.failed", date, message: error instanceof Error ? error.message : String(error) }));
+		const message = error instanceof Error ? error.message : String(error);
+		logEvent(exceededCpu(message) ? "cpu.exceeded" : "cron.failed", { date, cron, asset, message });
 	}
 }
 
@@ -163,24 +170,11 @@ async function trigger(url: URL, env: WorkerEnv, phase: "full" | "analyse"): Pro
 		assets = [assetParam];
 	}
 	try {
-		const started = await startDaily(env, {
-			date,
-			force,
-			assets,
-			phase,
-			runId: runIdFor(phase, date, force, assets),
-		});
-		return json(started, 202);
+		const started = await startEach(env, { date, force, assets, phase });
+		return json(started.length === 1 ? { ...started[0], started } : { started }, 202);
 	} catch (error) {
 		return json({ error: message(error) }, 500);
 	}
-}
-
-function runIdFor(phase: "full" | "analyse", date: string, force: boolean, assets: Asset[]): string {
-	if (!force && phase === "full" && assets.length === 2) return `cron-${date}`;
-	if (!force && phase === "analyse" && assets.length === 1) return `analyse-${assets[0]}-${date}`;
-	if (!force && phase === "analyse") return `analyse-${date}`;
-	return `${phase}-${date}-${Date.now()}`;
 }
 
 function viewerAllowed(url: URL, env: WorkerEnv): boolean {

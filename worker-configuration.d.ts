@@ -3,6 +3,7 @@
 // Runtime types generated with workerd@1.20260811.1 2026-08-14 nodejs_compat
 interface __BaseEnv_Env {
 	CHARTS_CACHE: KVNamespace;
+	IMAGES: ImagesBinding;
 	MYBROWSER: BrowserRun;
 	DEEPSEEK_MODEL: "deepseek-flash";
 	DEEPSEEK_REASONING_EFFORT: "high";

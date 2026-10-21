@@ -4,10 +4,12 @@ import { DAILY_TIMEFRAMES, TIMEFRAME_LABELS, isTimeframe } from "../capture/conf
 import { pngFailsVisibility } from "../capture/visibility";
 import type { CaptureStepResult } from "../capture/browser";
 import type { WorkerEnv } from "../env";
+import { logEvent } from "../observe";
 import { notifyFailure } from "../notify";
 import { renderReport } from "../report/render";
 import { completionDraftKey, getBytes, getText, putText, reportJsonKey, reportMdKey, runKey, screenshotKey } from "../storage/kv";
 import { AnalysisRequestError, completeChat, resolveModel } from "./client";
+import { compressModelImage, loadModelImages } from "./images";
 import { isUnusableCompletion, parseAnalysis } from "./parse";
 import { CITABLE_SECTIONS, PROMPT_VERSION } from "./prompt";
 import { buildRunContext, buildUserContent, type UserPart } from "./request";
@@ -132,15 +134,22 @@ export async function completeAnalysisChat(
 ): Promise<ChatStepResult> {
 	const kv = env.CHARTS_CACHE;
 	if (!kv) throw new AnalysisRequestError("CHARTS_CACHE namespace binding is not configured", false);
-	const loaded = await loadImages(kv, input.asset, input.date, input.capture);
+	const loaded = await loadModelImages(kv, input.asset, input.date, prepared.actual.length > 0 ? prepared.actual : imageTimeframes(input.capture));
 	if (loaded.length === 0) {
 		await fail(env, input, prepared.started, prepared.requested, prepared.actual, prepared.notes, EMPTY_COMPLETION, "no screenshots in KV");
 		return { ok: false, unusable: false, error: "no screenshots in KV" };
 	}
+	logEvent("analyse.chat.start", {
+		runId: input.runId,
+		asset: input.asset,
+		date: input.date,
+		images: loaded.map((image) => ({ timeframe: image.timeframe, bytes: image.bytes.byteLength, mime: image.mime })),
+	});
 	const images = loaded.map((image) => ({
 		label: isTimeframe(image.timeframe) ? TIMEFRAME_LABELS[image.timeframe] : image.timeframe,
 		base64: Buffer.from(image.bytes).toString("base64"),
 		timeframe: image.timeframe,
+		mime: image.mime,
 	}));
 	const userContent: UserPart[] = buildUserContent(images, buildRunContext({
 		asset: input.asset,
@@ -254,6 +263,9 @@ export async function analyseAsset(env: WorkerEnv, input: AnalyseInput): Promise
 	if (!prepared.ok || prepared.skipped) {
 		return { ok: prepared.ok, skipped: prepared.skipped, groundingWarning: false, error: prepared.error };
 	}
+	for (const timeframe of prepared.actual) {
+		await compressModelImage(env, input.asset, input.date, timeframe, input.force);
+	}
 	let chat = await completeAnalysisChat(env, input, prepared, null);
 	let retried = false;
 	if (chat.unusable) {
@@ -319,15 +331,19 @@ function stamp(
 	};
 }
 
+function imageTimeframes(capture: CaptureStepResult | null): string[] {
+	return capture?.frames.filter((frame) => frame.stored).map((frame) => frame.timeframe)
+		?? capture?.actualTimeframes
+		?? [...DAILY_TIMEFRAMES];
+}
+
 async function loadImages(
 	kv: KVNamespace,
 	asset: string,
 	date: string,
 	capture: CaptureStepResult | null,
 ): Promise<{ timeframe: string; bytes: Uint8Array }[]> {
-	const timeframes = capture?.frames.filter((frame) => frame.stored).map((frame) => frame.timeframe)
-		?? capture?.actualTimeframes
-		?? [...DAILY_TIMEFRAMES];
+	const timeframes = imageTimeframes(capture);
 	const images: { timeframe: string; bytes: Uint8Array }[] = [];
 	for (const timeframe of timeframes) {
 		const bytes = await getBytes(kv, screenshotKey(asset, timeframe, date));

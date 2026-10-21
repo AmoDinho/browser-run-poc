@@ -7,8 +7,8 @@ The Worker name is `fx-chart-analyst` (previously `browser-run-hello-world`). De
 ## Decisions
 
 - Timeframes per asset: `1D`, `30m`, `3h`. `15m` is not in the widget label map, so it is not requested. If `3 hours` is absent, capture falls back to `30 minutes` and records that.
-- Worker CPU limit is 5 minutes (`limits.cpu_ms`). Each timeframe is its own workflow step. Analysis is prepare, then chat, then parse, so a model retry does not share a CPU budget with parsing. Screenshots stay PNG.
-- Both `nasdaq100` and `gold` run on the weekday cron.
+- Worker CPU limit is 5 minutes (`limits.cpu_ms`). Each timeframe is its own workflow step. Analysis is prepare, then a per-image JPEG compress, then chat, then parse, so a model retry does not share a CPU budget with parsing or image encoding. Stored screenshots stay PNG. The model receives a separate 960px JPEG when the Images binding succeeds, and the PNG otherwise.
+- `nasdaq100` and `gold` are separate workflow instances. Nasdaq starts at 07:00 UTC and gold at 07:10 UTC, weekdays. A failure in one does not skip the other. Instance ids are `cron-nasdaq100-YYYY-MM-DD` and `cron-gold-YYYY-MM-DD`.
 - Model is `deepseek-flash` only. Vision calls are raw `POST https://api.deepseek.com/chat/completions`.
 - `knowledge/methodology.md` is the decision procedure (order-flow prompt). `knowledge/context.md` is separate reference notes. Both are loaded into the system message. The decision procedure wins if they conflict.
 
@@ -25,7 +25,7 @@ The Worker name is `fx-chart-analyst` (previously `browser-run-hello-world`). De
 - `GET|POST /run?token=…&force=1` — capture then analyse. Cron never sends `force=1`
 - `GET|POST /analyse?token=…&asset=gold&date=YYYY-MM-DD&force=1` — re-encode PNGs from KV. No recapture
 
-Every workflow run, cron or manual `/run` and `/analyse`, writes the brief and then sends one Telegram message.
+Every workflow run, cron or manual `/run` and `/analyse`, writes the brief and then sends one Telegram message for that asset. A morning with both assets sends two messages.
 
 Wrong or missing `token` on `/reports`, `/brief`, `/run`, and `/analyse` is **404**, not 401.
 
